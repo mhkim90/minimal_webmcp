@@ -83,33 +83,9 @@ Stdlib only. `tests/test_plumbing.py` is a self-contained E2E test that spawns t
 | Symptom | Cause | Fix |
 |---|---|---|
 | `WebViewException: pywebview must be run on a main thread.` on launch | `webview.start()` was called from a background thread (incompatible with pywebview 6.x). | Use the bundled `python3 -m minimal_webmcp` entry point (already main-thread safe) or call `webview.start()` on the main thread of your own app. |
-| `No module named minimal_webmcp` when launched by an MCP client | The client's `env` / `environment` block is not reaching the subprocess. | Point the MCP `command` at a wrapper script that sets `PYTHONPATH` (and `MINIMAL_WEBMCP_HEADLESS=1` for headless) before `exec python -m minimal_webmcp`. See the wrapper script below. |
+| `No module named minimal_webmcp` when launched by an MCP client (opencode, Claude Code, VS Code Copilot) | The client's `mcp.<name>.env` / `.environment` block is not reaching the subprocess. | Point the MCP `command` at a wrapper script that sets `PYTHONPATH` (and `MINIMAL_WEBMCP_HEADLESS=1` for headless) before `exec python -m minimal_webmcp`. See the opencode section above for an example. |
 | `screenshot: no data returned (page may block SVG/canvas)` | `QT_QPA_PLATFORM=offscreen` blocks the canvas `toDataURL` call used by `vendor/screenshot.js`. | Drop `MINIMAL_WEBMCP_HEADLESS=1` and use a real display server (X11 / Wayland) for the embedded driver. |
-| MCP client shows server as `failed` / `Connection closed` | Subprocess died before responding to `initialize` (e.g. because of the issues above). | Re-run the wrapper script directly from a shell to surface the traceback; the underlying Python error is the real problem. |
-
-### Wrapper script (recommended MCP launch path)
-
-Some MCP clients do not reliably propagate `env` / `environment` blocks to the
-subprocess, which makes the server fail with `No module named minimal_webmcp`
-even when the package is on `PYTHONPATH` in your shell. A small wrapper script
-sidesteps this by setting the env in the script itself and `exec`-ing the real
-entry point. The script can be referenced from any client's `command` field.
-
-```bash
-#!/usr/bin/env bash
-# ~/.local/bin/minimal_webmcp_server
-export PYTHONPATH="$HOME"                        # parent of the repo checkout
-export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
-exec python3 -m minimal_webmcp
-```
-
-```bash
-chmod +x ~/.local/bin/minimal_webmcp_server
-```
-
-Then point your MCP client's `command` at the absolute path of the wrapper
-(e.g. `/home/yourname/.local/bin/minimal_webmcp_server`) and drop the `env`
-block — the wrapper sets what the server needs.
+| Server starts but `opencode mcp list` shows `failed` / `Connection closed` | Subprocess died before responding to `initialize` (e.g. because of the two issues above). | Check `opencode mcp list --print-logs --log-level DEBUG` for the `mcp stderr:` lines; the underlying traceback is the real error. |
 
 ## Installation
 
@@ -255,25 +231,29 @@ desktop session.
 }
 ```
 
-If `mcp.<name>.environment` is not propagated to the subprocess on your
-install, point `command` at the wrapper script from the Troubleshooting
-section above:
+> **Note:** on some opencode installs the `mcp.<name>.environment` / `mcp.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```jsonc
+> {
+>   "mcp": {
+>     "minimal_webmcp": {
+>       "type": "local",
+>       "command": ["/home/yourname/.local/bin/minimal_webmcp_server"],
+>       "enabled": true
+>     }
+>   }
+> }
+> ```
 
-```jsonc
-{
-  "mcp": {
-    "minimal_webmcp": {
-      "type": "local",
-      "command": ["/home/yourname/.local/bin/minimal_webmcp_server"],
-      "enabled": true
-    }
-  }
-}
-```
-
-Tools register under the prefix `minimal_webmcp_*` (e.g. `minimal_webmcp_navigate`,
-`minimal_webmcp_screenshot`). Verify with `opencode mcp list` — the server
-should show as `connected` with 9 tools.
+Tools register under the prefix `minimal_webmcp_*` (e.g. `minimal_webmcp_navigate`, `minimal_webmcp_screenshot`). Verify with `opencode mcp list` — the server should show as `connected` with 9 tools.
 
 Example prompt:
 
@@ -321,6 +301,27 @@ Notes:
   }
   ```
 
+> **Note:** on some Claude Code installs the `mcpServers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```json
+> {
+>   "mcpServers": {
+>     "minimal_webmcp": {
+>       "type": "stdio",
+>       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+>     }
+>   }
+> }
+> ```
+
 Example prompt:
 
 ```
@@ -367,6 +368,27 @@ Notes:
     }
   }
   ```
+
+> **Note:** on some VS Code / Copilot installs the `servers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```json
+> {
+>   "servers": {
+>     "minimal_webmcp": {
+>       "type": "stdio",
+>       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+>     }
+>   }
+> }
+> ```
 
 Example prompt (Copilot Chat, agent mode):
 
