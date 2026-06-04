@@ -83,9 +83,33 @@ Stdlib only. `tests/test_plumbing.py` is a self-contained E2E test that spawns t
 | Symptom | Cause | Fix |
 |---|---|---|
 | `WebViewException: pywebview must be run on a main thread.` on launch | `webview.start()` was called from a background thread (incompatible with pywebview 6.x). | Use the bundled `python3 -m minimal_webmcp` entry point (already main-thread safe) or call `webview.start()` on the main thread of your own app. |
-| `No module named minimal_webmcp` when launched by an MCP client (opencode, Claude Code, VS Code Copilot) | The client's `mcp.<name>.env` / `.environment` block is not reaching the subprocess. | Point the MCP `command` at a wrapper script that sets `PYTHONPATH` (and `MINIMAL_WEBMCP_HEADLESS=1` for headless) before `exec python -m minimal_webmcp`. See the opencode section above for an example. |
+| `No module named minimal_webmcp` when launched by an MCP client | The client's `env` / `environment` block is not reaching the subprocess. | Point the MCP `command` at a wrapper script that sets `PYTHONPATH` (and `MINIMAL_WEBMCP_HEADLESS=1` for headless) before `exec python -m minimal_webmcp`. See the wrapper script below. |
 | `screenshot: no data returned (page may block SVG/canvas)` | `QT_QPA_PLATFORM=offscreen` blocks the canvas `toDataURL` call used by `vendor/screenshot.js`. | Drop `MINIMAL_WEBMCP_HEADLESS=1` and use a real display server (X11 / Wayland) for the embedded driver. |
-| Server starts but `opencode mcp list` shows `failed` / `Connection closed` | Subprocess died before responding to `initialize` (e.g. because of the two issues above). | Check `opencode mcp list --print-logs --log-level DEBUG` for the `mcp stderr:` lines; the underlying traceback is the real error. |
+| MCP client shows server as `failed` / `Connection closed` | Subprocess died before responding to `initialize` (e.g. because of the issues above). | Re-run the wrapper script directly from a shell to surface the traceback; the underlying Python error is the real problem. |
+
+### Wrapper script (recommended MCP launch path)
+
+Some MCP clients do not reliably propagate `env` / `environment` blocks to the
+subprocess, which makes the server fail with `No module named minimal_webmcp`
+even when the package is on `PYTHONPATH` in your shell. A small wrapper script
+sidesteps this by setting the env in the script itself and `exec`-ing the real
+entry point. The script can be referenced from any client's `command` field.
+
+```bash
+#!/usr/bin/env bash
+# ~/.local/bin/minimal_webmcp_server
+export PYTHONPATH="$HOME"                        # parent of the repo checkout
+export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+exec python3 -m minimal_webmcp
+```
+
+```bash
+chmod +x ~/.local/bin/minimal_webmcp_server
+```
+
+Then point your MCP client's `command` at the absolute path of the wrapper
+(e.g. `/home/yourname/.local/bin/minimal_webmcp_server`) and drop the `env`
+block — the wrapper sets what the server needs.
 
 ## Installation
 
@@ -197,167 +221,6 @@ Successful tool response (result body is JSON-encoded text in the `content[0].te
 
 ```json
 {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"url\":\"https://example.com\",\"title\":\"Example Domain\"}"}],"isError":false}}
-```
-
-## Editor integration
-
-The server is a stdio MCP server, so it works with any MCP-aware client. Below are the exact configs for opencode, Claude Code, and VS Code Copilot.
-
-### opencode
-
-Config is at `opencode.jsonc` in the project root (already committed). The `environment` block sets `PYTHONPATH` to the parent of the repo and forces MOCK mode — edit it to use the embedded driver in a real desktop session.
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "minimal_webmcp": {
-      "type": "local",
-      "command": ["python3", "-m", "minimal_webmcp"],
-      "enabled": true,
-      "environment": {
-        "PYTHONPATH": "/home/yourname",
-        "MINIMAL_WEBMCP_MOCK": "1"
-      }
-    }
-  }
-}
-```
-
-> **Note:** on some opencode installs the `mcp.<name>.environment` / `mcp.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
->
-> ```bash
-> # /home/yourname/.local/bin/minimal_webmcp_server
-> #!/usr/bin/env bash
-> export PYTHONPATH="/home/yourname"
-> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
-> exec /path/to/python -m minimal_webmcp
-> ```
->
-> ```jsonc
-> {
->   "mcp": {
->     "minimal_webmcp": {
->       "type": "local",
->       "command": ["/home/yourname/.local/bin/minimal_webmcp_server"],
->       "enabled": true
->     }
->   }
-> }
-> ```
-
-Tools register under the prefix `minimal_webmcp_*` (e.g. `minimal_webmcp_navigate`, `minimal_webmcp_screenshot`). Verify with `opencode mcp list` — the server should show as `connected` with 9 tools.
-
-Example prompt:
-
-```
-Navigate to https://example.com with minimal_webmcp, then take a screenshot
-and tell me the page title. Use minimal_webmcp.
-```
-
-### Claude Code
-
-Config is at `.mcp.json` in the project root (also already added in this repo). Claude Code picks it up automatically when launched from the project. For global config, use `~/.claude.json` instead.
-
-```json
-{
-  "mcpServers": {
-    "minimal_webmcp": {
-      "type": "stdio",
-      "command": "python3",
-      "args": ["-m", "minimal_webmcp"],
-      "env": {
-        "PYTHONPATH": "/home/yourname",
-        "MINIMAL_WEBMCP_MOCK": "1"
-      }
-    }
-  }
-}
-```
-
-Notes:
-- Claude Code uses the key `mcpServers` (plural) and `type: "stdio"`.
-- If you've installed the package with `pip install`, drop `PYTHONPATH` and `args` and just use `command: "minimal_webmcp"`.
-
-> **Note:** on some Claude Code installs the `mcpServers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
->
-> ```bash
-> # /home/yourname/.local/bin/minimal_webmcp_server
-> #!/usr/bin/env bash
-> export PYTHONPATH="/home/yourname"
-> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
-> exec /path/to/python -m minimal_webmcp
-> ```
->
-> ```json
-> {
->   "mcpServers": {
->     "minimal_webmcp": {
->       "type": "stdio",
->       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
->     }
->   }
-> }
-> ```
-
-Example prompt:
-
-```
-Open https://news.ycombinator.com with the minimal_webmcp tools, click the
-first story link, and summarize the article body. Use minimal_webmcp.
-```
-
-### VS Code Copilot
-
-Config is at `.vscode/mcp.json` in the project root (also committed in this repo). VS Code reads it for GitHub Copilot's agent mode; MCP support must be enabled in the relevant VS Code / Copilot Chat build.
-
-```json
-{
-  "servers": {
-    "minimal_webmcp": {
-      "type": "stdio",
-      "command": "python3",
-      "args": ["-m", "minimal_webmcp"],
-      "env": {
-        "PYTHONPATH": "/home/yourname",
-        "MINIMAL_WEBMCP_MOCK": "1"
-      }
-    }
-  }
-}
-```
-
-Notes:
-- VS Code uses the key `servers` (not `mcpServers`).
-- The first time VS Code loads the server it may prompt to trust it.
-- Switch from MOCK to the real embedded driver by removing `MINIMAL_WEBMCP_MOCK` from the `env` block.
-
-> **Note:** on some VS Code / Copilot installs the `servers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
->
-> ```bash
-> # /home/yourname/.local/bin/minimal_webmcp_server
-> #!/usr/bin/env bash
-> export PYTHONPATH="/home/yourname"
-> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
-> exec /path/to/python -m minimal_webmcp
-> ```
->
-> ```json
-> {
->   "servers": {
->     "minimal_webmcp": {
->       "type": "stdio",
->       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
->     }
->   }
-> }
-> ```
-
-Example prompt (Copilot Chat, agent mode):
-
-```
-@workspace use minimal_webmcp to navigate to https://github.com/microsoft/vscode
-and tell me the current star count.
 ```
 
 ## Architecture
