@@ -70,11 +70,22 @@ pip install --user pywebview
 pip install --user 'pywebview[qt]'
 ```
 
-> **Note:** "headless" embedded mode (`MINIMAL_WEBMCP_HEADLESS=1`) sets `QT_QPA_PLATFORM=offscreen` and works for many tools, but page rendering still needs a WebEngine. The embedded driver is **not** suitable for a headless server / CI without a display server — use MOCK mode for tests and CI.
+> **Note:** "headless" embedded mode (`MINIMAL_WEBMCP_HEADLESS=1`) sets `QT_QPA_PLATFORM=offscreen` and works for most tools, but the DOM-to-PNG screenshot hack in `vendor/screenshot.js` relies on a working canvas and returns no data under the offscreen Qt backend (drop the flag and use a real display to get PNGs). The embedded driver is still a desktop browser, not a true headless engine — use MOCK mode for offline tests and CI.
+>
+> **pywebview 6.x threading:** `webview.start()` must run on the process main thread. The bundled `__main__.py` puts the GUI event loop on the main thread and runs the JSON-RPC loop in the webview's worker callback, so the standard `python3 -m minimal_webmcp` invocation is safe to use with `pywebview>=6.0,<7`. If you embed `EmbeddedDriver` in your own application, do not call `webview.start()` from a background thread — it will raise `WebViewException('pywebview must be run on a main thread.')`.
 
 ### Test dependencies
 
 Stdlib only. `tests/test_plumbing.py` is a self-contained E2E test that spawns the server as a subprocess and exercises every tool.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `WebViewException: pywebview must be run on a main thread.` on launch | `webview.start()` was called from a background thread (incompatible with pywebview 6.x). | Use the bundled `python3 -m minimal_webmcp` entry point (already main-thread safe) or call `webview.start()` on the main thread of your own app. |
+| `No module named minimal_webmcp` when launched by an MCP client (opencode, Claude Code, VS Code Copilot) | The client's `mcp.<name>.env` / `.environment` block is not reaching the subprocess. | Point the MCP `command` at a wrapper script that sets `PYTHONPATH` (and `MINIMAL_WEBMCP_HEADLESS=1` for headless) before `exec python -m minimal_webmcp`. See the opencode section above for an example. |
+| `screenshot: no data returned (page may block SVG/canvas)` | `QT_QPA_PLATFORM=offscreen` blocks the canvas `toDataURL` call used by `vendor/screenshot.js`. | Drop `MINIMAL_WEBMCP_HEADLESS=1` and use a real display server (X11 / Wayland) for the embedded driver. |
+| Server starts but `opencode mcp list` shows `failed` / `Connection closed` | Subprocess died before responding to `initialize` (e.g. because of the two issues above). | Check `opencode mcp list --print-logs --log-level DEBUG` for the `mcp stderr:` lines; the underlying traceback is the real error. |
 
 ## Installation
 
@@ -205,13 +216,35 @@ Config is at `opencode.jsonc` in the project root (already committed). The `envi
       "command": ["python3", "-m", "minimal_webmcp"],
       "enabled": true,
       "environment": {
-        "PYTHONPATH": "/home/mhkim",
+        "PYTHONPATH": "/home/yourname",
         "MINIMAL_WEBMCP_MOCK": "1"
       }
     }
   }
 }
 ```
+
+> **Note:** on some opencode installs the `mcp.<name>.environment` / `mcp.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```jsonc
+> {
+>   "mcp": {
+>     "minimal_webmcp": {
+>       "type": "local",
+>       "command": ["/home/yourname/.local/bin/minimal_webmcp_server"],
+>       "enabled": true
+>     }
+>   }
+> }
+> ```
 
 Tools register under the prefix `minimal_webmcp_*` (e.g. `minimal_webmcp_navigate`, `minimal_webmcp_screenshot`). Verify with `opencode mcp list` — the server should show as `connected` with 9 tools.
 
@@ -234,7 +267,7 @@ Config is at `.mcp.json` in the project root (also already added in this repo). 
       "command": "python3",
       "args": ["-m", "minimal_webmcp"],
       "env": {
-        "PYTHONPATH": "/home/mhkim",
+        "PYTHONPATH": "/home/yourname",
         "MINIMAL_WEBMCP_MOCK": "1"
       }
     }
@@ -245,6 +278,27 @@ Config is at `.mcp.json` in the project root (also already added in this repo). 
 Notes:
 - Claude Code uses the key `mcpServers` (plural) and `type: "stdio"`.
 - If you've installed the package with `pip install`, drop `PYTHONPATH` and `args` and just use `command: "minimal_webmcp"`.
+
+> **Note:** on some Claude Code installs the `mcpServers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```json
+> {
+>   "mcpServers": {
+>     "minimal_webmcp": {
+>       "type": "stdio",
+>       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+>     }
+>   }
+> }
+> ```
 
 Example prompt:
 
@@ -265,7 +319,7 @@ Config is at `.vscode/mcp.json` in the project root (also committed in this repo
       "command": "python3",
       "args": ["-m", "minimal_webmcp"],
       "env": {
-        "PYTHONPATH": "/home/mhkim",
+        "PYTHONPATH": "/home/yourname",
         "MINIMAL_WEBMCP_MOCK": "1"
       }
     }
@@ -277,6 +331,27 @@ Notes:
 - VS Code uses the key `servers` (not `mcpServers`).
 - The first time VS Code loads the server it may prompt to trust it.
 - Switch from MOCK to the real embedded driver by removing `MINIMAL_WEBMCP_MOCK` from the `env` block.
+
+> **Note:** on some VS Code / Copilot installs the `servers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
+>
+> ```bash
+> # /home/yourname/.local/bin/minimal_webmcp_server
+> #!/usr/bin/env bash
+> export PYTHONPATH="/home/yourname"
+> export MINIMAL_WEBMCP_HEADLESS="${MINIMAL_WEBMCP_HEADLESS:-1}"
+> exec /path/to/python -m minimal_webmcp
+> ```
+>
+> ```json
+> {
+>   "servers": {
+>     "minimal_webmcp": {
+>       "type": "stdio",
+>       "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+>     }
+>   }
+> }
+> ```
 
 Example prompt (Copilot Chat, agent mode):
 
