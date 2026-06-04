@@ -223,6 +223,158 @@ Successful tool response (result body is JSON-encoded text in the `content[0].te
 {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"url\":\"https://example.com\",\"title\":\"Example Domain\"}"}],"isError":false}}
 ```
 
+## Editor integration
+
+The server is a stdio MCP server, so it works with any MCP-aware client. The
+snippets below are **examples to copy into your own client config** — they are
+not committed to the repo. Save them to the path your client reads, e.g.
+`opencode.jsonc` for opencode, `.mcp.json` for Claude Code, or
+`.vscode/mcp.json` for VS Code Copilot.
+
+### opencode
+
+`opencode.jsonc` in the project root (or `~/.config/opencode/config.jsonc`
+for global). The `environment` block sets `PYTHONPATH` to the parent of the
+repo and forces MOCK mode — edit it to use the embedded driver in a real
+desktop session.
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "minimal_webmcp": {
+      "type": "local",
+      "command": ["python3", "-m", "minimal_webmcp"],
+      "enabled": true,
+      "environment": {
+        "PYTHONPATH": "/home/yourname",
+        "MINIMAL_WEBMCP_MOCK": "1"
+      }
+    }
+  }
+}
+```
+
+If `mcp.<name>.environment` is not propagated to the subprocess on your
+install, point `command` at the wrapper script from the Troubleshooting
+section above:
+
+```jsonc
+{
+  "mcp": {
+    "minimal_webmcp": {
+      "type": "local",
+      "command": ["/home/yourname/.local/bin/minimal_webmcp_server"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Tools register under the prefix `minimal_webmcp_*` (e.g. `minimal_webmcp_navigate`,
+`minimal_webmcp_screenshot`). Verify with `opencode mcp list` — the server
+should show as `connected` with 9 tools.
+
+Example prompt:
+
+```
+Navigate to https://example.com with minimal_webmcp, then take a screenshot
+and tell me the page title. Use minimal_webmcp.
+```
+
+### Claude Code
+
+`.mcp.json` in the project root (or `~/.claude.json` for global). Claude
+Code picks the project file up automatically when launched from the
+project.
+
+```json
+{
+  "mcpServers": {
+    "minimal_webmcp": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "minimal_webmcp"],
+      "env": {
+        "PYTHONPATH": "/home/yourname",
+        "MINIMAL_WEBMCP_MOCK": "1"
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Claude Code uses the key `mcpServers` (plural) and `type: "stdio"`.
+- If you've installed the package with `pip install`, drop `PYTHONPATH` and
+  `args` and just use `command: "minimal_webmcp"`.
+- If `mcpServers.<name>.env` is not propagated on your install, point
+  `command` at the wrapper script:
+
+  ```json
+  {
+    "mcpServers": {
+      "minimal_webmcp": {
+        "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+      }
+    }
+  }
+  ```
+
+Example prompt:
+
+```
+Open https://news.ycombinator.com with the minimal_webmcp tools, click the
+first story link, and summarize the article body. Use minimal_webmcp.
+```
+
+### VS Code Copilot
+
+`.vscode/mcp.json` in the project root. VS Code reads it for GitHub
+Copilot's agent mode; MCP support must be enabled in the relevant VS Code /
+Copilot Chat build.
+
+```json
+{
+  "servers": {
+    "minimal_webmcp": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "minimal_webmcp"],
+      "env": {
+        "PYTHONPATH": "/home/yourname",
+        "MINIMAL_WEBMCP_MOCK": "1"
+      }
+    }
+  }
+}
+```
+
+Notes:
+- VS Code uses the key `servers` (not `mcpServers`).
+- The first time VS Code loads the server it may prompt to trust it.
+- Switch from MOCK to the real embedded driver by removing
+  `MINIMAL_WEBMCP_MOCK` from the `env` block.
+- If `servers.<name>.env` is not propagated on your install, point
+  `command` at the wrapper script:
+
+  ```json
+  {
+    "servers": {
+      "minimal_webmcp": {
+        "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+      }
+    }
+  }
+  ```
+
+Example prompt (Copilot Chat, agent mode):
+
+```
+@workspace use minimal_webmcp to navigate to https://github.com/microsoft/vscode
+and tell me the current star count.
+```
+
 ## Architecture
 
 ```
