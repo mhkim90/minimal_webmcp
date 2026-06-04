@@ -1,4 +1,4 @@
-"""Entry point: python3 -m webmcp. Stdlib core, optional pywebview for embed mode."""
+"""Entry point: python3 -m minimal_webmcp. Stdlib core, optional pywebview for embed mode."""
 
 import os
 import sys
@@ -21,7 +21,7 @@ def _install_hint():
             "pip install --user 'pywebview[qt]'\n"
             "\n"
             "# Or mock mode (no install):\n"
-            "WEBMCP_MOCK=1 python3 -m webmcp"
+            "MINIMAL_WEBMCP_MOCK=1 python3 -m minimal_webmcp"
         )
     if sys.platform == "darwin":
         return (
@@ -30,7 +30,7 @@ def _install_hint():
             "# If Qt backend desired: pip install --user 'pywebview[qt]'\n"
             "\n"
             "# Mock mode (no install):\n"
-            "WEBMCP_MOCK=1 python3 -m webmcp"
+            "MINIMAL_WEBMCP_MOCK=1 python3 -m minimal_webmcp"
         )
     if sys.platform == "win32":
         return (
@@ -38,7 +38,7 @@ def _install_hint():
             "pip install --user 'pywebview[qt]'\n"
             "\n"
             "# Mock mode:\n"
-            "$env:WEBMCP_MOCK=1; python -m webmcp"
+            "$env:MINIMAL_WEBMCP_MOCK=1; python -m minimal_webmcp"
         )
     return "pip install --user pywebview"
 
@@ -53,30 +53,30 @@ class DriverProxy:
 
     def __getattr__(self, name):
         if not self._ready.wait(timeout=60):
-            raise RuntimeError("webmcp: driver not ready within 60s")
+            raise RuntimeError("minimal_webmcp: driver not ready within 60s")
         err = self._get_error()
         if err is not None:
             raise err
         driver = self._get_driver()
         if driver is None:
-            raise RuntimeError("webmcp: driver unavailable")
+            raise RuntimeError("minimal_webmcp: driver unavailable")
         return getattr(driver, name)
 
 
 def _bootstrap(kind, kwargs, state):
     """Background: instantiate driver."""
     try:
-        sys.stderr.write(f"webmcp: starting {kind} driver\n")
+        sys.stderr.write(f"minimal_webmcp: starting {kind} driver\n")
         sys.stderr.flush()
         driver = make_driver(kind, **kwargs)
         if hasattr(driver, "_start"):
             driver._start()
         state["driver"] = driver
-        sys.stderr.write("webmcp: ready\n")
+        sys.stderr.write("minimal_webmcp: ready\n")
         sys.stderr.flush()
     except Exception as e:
         state["error"] = e
-        sys.stderr.write(f"webmcp: bootstrap error: {e}\n")
+        sys.stderr.write(f"minimal_webmcp: bootstrap error: {e}\n")
         if "pywebview" in str(e).lower() or "No module named 'webview'" in str(e):
             sys.stderr.write("\n" + _install_hint() + "\n")
         sys.stderr.flush()
@@ -92,11 +92,11 @@ def main(argv=None):
         sys.stdout.write(_install_hint() + "\n")
         return 0
 
-    mock = os.environ.get("WEBMCP_MOCK") == "1"
-    headless = os.environ.get("WEBMCP_HEADLESS") == "1"
+    mock = os.environ.get("MINIMAL_WEBMCP_MOCK") == "1"
+    headless = os.environ.get("MINIMAL_WEBMCP_HEADLESS") == "1"
 
     if mock:
-        sys.stderr.write("webmcp: MOCK mode (no real browser)\n")
+        sys.stderr.write("minimal_webmcp: MOCK mode (no real browser)\n")
         sys.stderr.flush()
         try:
             server.run(make_driver("mock"))

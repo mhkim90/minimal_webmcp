@@ -1,4 +1,4 @@
-"""End-to-end test: spawn webmcp in MOCK mode, send JSON-RPC, check responses."""
+"""End-to-end test: spawn minimal_webmcp in MOCK mode, send JSON-RPC, check responses."""
 
 import json
 import os
@@ -25,14 +25,17 @@ def read_one(proc, timeout=10):
 
 
 def main():
+    proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, MINIMAL_WEBMCP_MOCK="1",
+                PYTHONPATH=os.path.dirname(proj_dir))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "webmcp"],
-        cwd="/workspace",
-        env={"WEBMCP_MOCK": "1", "PATH": "/usr/bin:/bin"},
+        [sys.executable, "-m", "minimal_webmcp"],
+        cwd=proj_dir,
+        env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        universal_newlines=True,
     )
 
     failures = []
@@ -46,7 +49,7 @@ def main():
         r = read_one(proc)
         assert r.get("id") == 1, f"initialize id mismatch: {r}"
         assert "result" in r, f"initialize no result: {r}"
-        assert r["result"]["serverInfo"]["name"] == "webmcp"
+        assert r["result"]["serverInfo"]["name"] == "minimal_webmcp"
         print("OK initialize")
 
         # 2. initialized notification
@@ -104,7 +107,7 @@ def main():
         print(f"OK screenshot: size={result['size']}, magic valid")
 
         # 6b. tools/call screenshot with file path
-        shot_path = "/tmp/webmcp_test_shot.png"
+        shot_path = "/tmp/minimal_webmcp_test_shot.png"
         if os.path.exists(shot_path):
             os.remove(shot_path)
         send(proc, "tools/call", {

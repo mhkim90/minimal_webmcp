@@ -7,7 +7,7 @@ import traceback
 from . import tools
 
 
-SERVER_NAME = "webmcp"
+SERVER_NAME = "minimal_webmcp"
 SERVER_VERSION = "0.1.0"
 PROTOCOL_VERSION = "2024-11-05"
 

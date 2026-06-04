@@ -9,7 +9,7 @@ from pathlib import Path
 from .base import Driver
 
 # Lazy import — only attempt when EmbeddedDriver is actually instantiated.
-# This keeps WEBMCP_MOCK=1 mode 100% stdlib.
+# This keeps MINIMAL_WEBMCP_MOCK=1 mode 100% stdlib.
 _HAS_WEBVIEW = None
 _webview = None
 
@@ -29,11 +29,11 @@ def _try_import_webview():
 _HERE = Path(__file__).parent
 _pkg_vendor = _HERE.parent / "vendor" / "screenshot.js"
 _file_vendor = _HERE / "vendor" / "screenshot.js"
-# When this file is inlined into a single-file webmcp.py at <some_dir>/webmcp.py,
-# __file__ resolves to <some_dir>/webmcp.py so _HERE = <some_dir>. The single-file
-# bundle expects vendor/ next to the script. Also check the inlined webmcp/ dir.
+# When this file is inlined into a single-file minimal_webmcp.py at <some_dir>/minimal_webmcp.py,
+# __file__ resolves to <some_dir>/minimal_webmcp.py so _HERE = <some_dir>. The single-file
+# bundle expects vendor/ next to the script. Also check the inlined minimal_webmcp/ dir.
 _single_root = _HERE / "vendor" / "screenshot.js"
-_single_pckg = _HERE / "webmcp" / "vendor" / "screenshot.js"
+_single_pckg = _HERE / "minimal_webmcp" / "vendor" / "screenshot.js"
 
 def _find_screenshot_js():
     for p in (_pkg_vendor, _file_vendor, _single_root, _single_pckg):
@@ -45,11 +45,11 @@ def _find_screenshot_js():
 class EmbeddedDriver(Driver):
     """Uses pywebview to open an OS-native webview. Lazy start, sync evaluate."""
 
-    def __init__(self, headless=False, width=1024, height=768, title="webmcp"):
+    def __init__(self, headless=False, width=1024, height=768, title="minimal_webmcp"):
         if not _try_import_webview():
             raise RuntimeError(
                 "pywebview not installed. Run: pip install 'pywebview>=6.0,<7'\n"
-                "or set WEBMCP_MOCK=1 for offline testing."
+                "or set MINIMAL_WEBMCP_MOCK=1 for offline testing."
             )
         self._headless = headless
         self._width = width
@@ -75,7 +75,7 @@ class EmbeddedDriver(Driver):
 
         self._window = _webview.create_window(
             self._title,
-            html="<html><body><h1>webmcp</h1><p>ready</p></body></html>",
+            html="<html><body><h1>minimal_webmcp</h1><p>ready</p></body></html>",
             width=self._width,
             height=self._height,
             hidden=False,
@@ -131,7 +131,7 @@ class EmbeddedDriver(Driver):
 
     def screenshot(self):
         self._ensure()
-        b64 = self.evaluate("__webmcp_screenshot()")
+        b64 = self.evaluate("__minimal_webmcp_screenshot()")
         if isinstance(b64, str):
             return base64.b64decode(b64)
         raise RuntimeError("screenshot: no data returned (page may block SVG/canvas)")

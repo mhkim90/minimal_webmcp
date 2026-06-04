@@ -136,7 +136,7 @@ def call_tool(driver, name, args):
         # Auto-save
         import tempfile, os
         tmpdir = tempfile.gettempdir()
-        fname = f"webmcp_shot_{int(time.time()*1000)}.png"
+        fname = f"minimal_webmcp_shot_{int(time.time()*1000)}.png"
         full_path = os.path.join(tmpdir, fname)
         Path(full_path).write_bytes(png)
         return {

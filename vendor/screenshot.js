@@ -2,7 +2,7 @@
 // Uses SVG foreignObject hack — no external deps, no internet.
 // Returns Promise<string> resolving to base64 PNG (without data: prefix).
 (function() {
-  window.__webmcp_screenshot = async function() {
+  window.__minimal_webmcp_screenshot = async function() {
     try {
       // Get full page dimensions
       const w = Math.max(
