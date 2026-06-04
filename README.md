@@ -201,11 +201,18 @@ Successful tool response (result body is JSON-encoded text in the `content[0].te
 
 ## Editor integration
 
-The server is a stdio MCP server, so it works with any MCP-aware client. Below are the exact configs for opencode, Claude Code, and VS Code Copilot.
+The server is a stdio MCP server, so it works with any MCP-aware client. The
+snippets below are **examples to copy into your own client config** — they are
+not committed to the repo. Save them to the path your client reads, e.g.
+`opencode.jsonc` for opencode, `.mcp.json` for Claude Code, or
+`.vscode/mcp.json` for VS Code Copilot.
 
 ### opencode
 
-Config is at `opencode.jsonc` in the project root (already committed). The `environment` block sets `PYTHONPATH` to the parent of the repo and forces MOCK mode — edit it to use the embedded driver in a real desktop session.
+`opencode.jsonc` in the project root (or `~/.config/opencode/config.jsonc`
+for global). The `environment` block sets `PYTHONPATH` to the parent of the
+repo and forces MOCK mode — edit it to use the embedded driver in a real
+desktop session.
 
 ```jsonc
 {
@@ -257,7 +264,9 @@ and tell me the page title. Use minimal_webmcp.
 
 ### Claude Code
 
-Config is at `.mcp.json` in the project root (also already added in this repo). Claude Code picks it up automatically when launched from the project. For global config, use `~/.claude.json` instead.
+`.mcp.json` in the project root (or `~/.claude.json` for global). Claude
+Code picks the project file up automatically when launched from the
+project.
 
 ```json
 {
@@ -277,7 +286,20 @@ Config is at `.mcp.json` in the project root (also already added in this repo). 
 
 Notes:
 - Claude Code uses the key `mcpServers` (plural) and `type: "stdio"`.
-- If you've installed the package with `pip install`, drop `PYTHONPATH` and `args` and just use `command: "minimal_webmcp"`.
+- If you've installed the package with `pip install`, drop `PYTHONPATH` and
+  `args` and just use `command: "minimal_webmcp"`.
+- If `mcpServers.<name>.env` is not propagated on your install, point
+  `command` at the wrapper script:
+
+  ```json
+  {
+    "mcpServers": {
+      "minimal_webmcp": {
+        "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+      }
+    }
+  }
+  ```
 
 > **Note:** on some Claude Code installs the `mcpServers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
 >
@@ -309,7 +331,9 @@ first story link, and summarize the article body. Use minimal_webmcp.
 
 ### VS Code Copilot
 
-Config is at `.vscode/mcp.json` in the project root (also committed in this repo). VS Code reads it for GitHub Copilot's agent mode; MCP support must be enabled in the relevant VS Code / Copilot Chat build.
+`.vscode/mcp.json` in the project root. VS Code reads it for GitHub
+Copilot's agent mode; MCP support must be enabled in the relevant VS Code /
+Copilot Chat build.
 
 ```json
 {
@@ -330,7 +354,20 @@ Config is at `.vscode/mcp.json` in the project root (also committed in this repo
 Notes:
 - VS Code uses the key `servers` (not `mcpServers`).
 - The first time VS Code loads the server it may prompt to trust it.
-- Switch from MOCK to the real embedded driver by removing `MINIMAL_WEBMCP_MOCK` from the `env` block.
+- Switch from MOCK to the real embedded driver by removing
+  `MINIMAL_WEBMCP_MOCK` from the `env` block.
+- If `servers.<name>.env` is not propagated on your install, point
+  `command` at the wrapper script:
+
+  ```json
+  {
+    "servers": {
+      "minimal_webmcp": {
+        "command": "/home/yourname/.local/bin/minimal_webmcp_server"
+      }
+    }
+  }
+  ```
 
 > **Note:** on some VS Code / Copilot installs the `servers.<name>.env` block is not propagated to the subprocess, which then fails to import the package (`No module named minimal_webmcp`). When that happens, point `command` at a wrapper script that sets the env itself:
 >
