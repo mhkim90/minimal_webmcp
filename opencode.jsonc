@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "minimal_webmcp": {
+      "type": "local",
+      "command": ["python3", "-m", "minimal_webmcp"],
+      "enabled": true,
+      "environment": {
+        "PYTHONPATH": "/home/mhkim",
+        "MINIMAL_WEBMCP_MOCK": "1"
+      }
+    }
+  }
+}
