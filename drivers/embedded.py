@@ -58,16 +58,20 @@ class EmbeddedDriver(Driver):
         self._window = None
         self._ready = threading.Event()
         self._error = None
-        self._loop_thread = None
 
     def _start(self):
-        if self._loop_thread is not None:
+        """Create the window and register the loaded hook.
+
+        Must run on the process main thread (pywebview 6.x constraint applies to
+        webview.start(), and create_window() is cheapest to call alongside it).
+        The actual GUI event loop is started by the caller via webview.start();
+        see __main__.py for the worker-thread pattern.
+        """
+        if self._window is not None:
             return
-        # Set Qt offscreen platform for headless
         if self._headless:
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-        # Load screenshot.js to inject later
         path = _find_screenshot_js()
         if not path.exists():
             raise RuntimeError(f"screenshot.js missing: tried {_pkg_vendor}, {_file_vendor}")
@@ -83,7 +87,6 @@ class EmbeddedDriver(Driver):
 
         def _on_loaded():
             try:
-                # Inject screenshot helper
                 self._window.evaluate_js(self._screenshot_js)
                 self._ready.set()
             except Exception as e:
@@ -92,24 +95,19 @@ class EmbeddedDriver(Driver):
 
         self._window.events.loaded += _on_loaded
 
-        def _loop():
-            try:
-                _webview.start()
-            except Exception as e:
-                self._error = e
-                self._ready.set()
-
-        self._loop_thread = threading.Thread(target=_loop, daemon=True)
-        self._loop_thread.start()
-        # Wait for window to be ready
-        if not self._ready.wait(timeout=30):
-            raise RuntimeError("webview: window did not become ready in 30s")
+    def wait_ready(self, timeout=30):
+        """Block until the initial window load event fires. Worker-thread side."""
+        if not self._ready.wait(timeout=timeout):
+            raise RuntimeError(f"webview: window did not become ready in {timeout}s")
         if self._error:
             raise self._error
 
     def _ensure(self):
-        if self._loop_thread is None:
-            self._start()
+        if self._window is None:
+            raise RuntimeError(
+                "EmbeddedDriver: _start() must be called on the main thread "
+                "and webview.start() must be running before tool calls."
+            )
 
     def navigate(self, url):
         self._ensure()

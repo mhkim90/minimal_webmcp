@@ -43,45 +43,56 @@ def _install_hint():
     return "pip install --user pywebview"
 
 
-class DriverProxy:
-    """Forwards to a real driver once it's ready. Blocks until ready (or error)."""
-
-    def __init__(self, ready_event, get_driver, get_error):
-        self._ready = ready_event
-        self._get_driver = get_driver
-        self._get_error = get_error
-
-    def __getattr__(self, name):
-        if not self._ready.wait(timeout=60):
-            raise RuntimeError("minimal_webmcp: driver not ready within 60s")
-        err = self._get_error()
-        if err is not None:
-            raise err
-        driver = self._get_driver()
-        if driver is None:
-            raise RuntimeError("minimal_webmcp: driver unavailable")
-        return getattr(driver, name)
-
-
-def _bootstrap(kind, kwargs, state):
-    """Background: instantiate driver."""
+def _run_embedded(headless):
+    """Embedded mode: webview.start() runs the GUI on the main thread (pywebview 6.x
+    requirement), and server.run() runs in a worker thread started by webview."""
     try:
-        sys.stderr.write(f"minimal_webmcp: starting {kind} driver\n")
-        sys.stderr.flush()
-        driver = make_driver(kind, **kwargs)
-        if hasattr(driver, "_start"):
-            driver._start()
-        state["driver"] = driver
-        sys.stderr.write("minimal_webmcp: ready\n")
-        sys.stderr.flush()
+        driver = make_driver("embedded", headless=headless)
     except Exception as e:
-        state["error"] = e
-        sys.stderr.write(f"minimal_webmcp: bootstrap error: {e}\n")
+        sys.stderr.write(f"minimal_webmcp: cannot create embedded driver: {e}\n")
         if "pywebview" in str(e).lower() or "No module named 'webview'" in str(e):
             sys.stderr.write("\n" + _install_hint() + "\n")
         sys.stderr.flush()
-    finally:
-        state["ready"].set()
+        return 1
+
+    # Create the window on the main thread; webview.start() will spin the event loop here.
+    try:
+        driver._start()
+    except Exception as e:
+        sys.stderr.write(f"minimal_webmcp: driver _start error: {e}\n")
+        sys.stderr.flush()
+        return 1
+
+    sys.stderr.write("minimal_webmcp: starting embedded driver\n")
+    sys.stderr.flush()
+
+    state = {"rc": 0}
+
+    def _serve():
+        # Runs in the worker thread created by webview.start().
+        try:
+            driver.wait_ready(timeout=60)
+            sys.stderr.write("minimal_webmcp: ready\n")
+            sys.stderr.flush()
+            server.run(driver)
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            sys.stderr.write(f"minimal_webmcp: serve error: {e}\n{traceback.format_exc()}")
+            sys.stderr.flush()
+            state["rc"] = 1
+        finally:
+            try:
+                driver.close()  # destroys window so webview.start() returns
+            except Exception:
+                pass
+
+    import webview as _webview
+    try:
+        _webview.start(_serve)
+    except KeyboardInterrupt:
+        pass
+    return state["rc"]
 
 
 def main(argv=None):
@@ -104,33 +115,8 @@ def main(argv=None):
             pass
         return 0
 
-    # Default: embedded pywebview
-    state = {"ready": threading.Event(), "driver": None, "error": None}
-    kwargs = {}
-    if headless:
-        kwargs["headless"] = True
-    threading.Thread(
-        target=_bootstrap, args=("embedded", kwargs, state), daemon=True
-    ).start()
-
-    proxy = DriverProxy(
-        state["ready"],
-        lambda: state["driver"],
-        lambda: state["error"],
-    )
-
-    try:
-        server.run(proxy)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        driver = state["driver"]
-        if driver is not None:
-            try:
-                driver.close()
-            except Exception:
-                pass
-    return 0
+    # Default: embedded pywebview on main thread, server in worker.
+    return _run_embedded(headless)
 
 
 if __name__ == "__main__":
