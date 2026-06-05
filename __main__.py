@@ -6,6 +6,7 @@ import threading
 import traceback
 
 from . import server
+from . import _qt_env
 from .drivers import make_driver
 
 
@@ -104,7 +105,15 @@ def main(argv=None):
         return 0
 
     mock = os.environ.get("MINIMAL_WEBMCP_MOCK") == "1"
-    headless = os.environ.get("MINIMAL_WEBMCP_HEADLESS") == "1"
+    # Accept both MINIMAL_WEBMCP_HEADLESS (canonical) and MINIMAL_MCP_HEADLESS (alias).
+    headless = (
+        os.environ.get("MINIMAL_WEBMCP_HEADLESS") == "1"
+        or os.environ.get("MINIMAL_MCP_HEADLESS") == "1"
+    )
+
+    # Headless + no-GPU setup MUST happen before any code path that
+    # could import pywebview or construct QApplication. See _qt_env docstring.
+    _qt_env.configure_qt_for_headless(headless=headless)
 
     if mock:
         sys.stderr.write("minimal_webmcp: MOCK mode (no real browser)\n")

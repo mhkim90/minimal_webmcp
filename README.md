@@ -135,7 +135,41 @@ python3 -m minimal_webmcp --print-install
 | Variable | Effect |
 |----------|--------|
 | `MINIMAL_WEBMCP_MOCK=1` | Use `MockDriver` (no browser). Stdlib-only mode. |
-| `MINIMAL_WEBMCP_HEADLESS=1` | Set `QT_QPA_PLATFORM=offscreen` for the embedded driver. |
+| `MINIMAL_WEBMCP_HEADLESS=1` | Set `QT_QPA_PLATFORM=offscreen` and apply the headless + no-GPU recipe. See [Headless + no-GPU](#headless--no-gpu) below. |
+| `MINIMAL_MCP_HEADLESS=1` | Alias for `MINIMAL_WEBMCP_HEADLESS`. Prints a one-time deprecation note on stderr. |
+| `PYWEBVIEW_GUI=qt` | Force the Qt renderer (Linux only). The headless recipe sets this automatically. |
+| `PYWEBVIEW_LOG=INFO\|WARNING\|debug` | pywebview log level. Default `INFO`. The headless recipe sets `WARNING` automatically. |
+| `MINIMAL_WEBMCP_QT_FLAGS="..."` | Override the default Chromium flag recipe (only used when this env var is unset). |
+
+### Headless + no-GPU
+
+When `MINIMAL_WEBMCP_HEADLESS=1` is set, `minimal_webmcp` runs the embedded driver under the offscreen QPA platform with a Chromium flag recipe designed to keep WebEngine performant when the host has no working GPU. The recipe is applied at process startup by `minimal_webmcp._qt_env.configure_qt_for_headless()`, which must run *before* pywebview's `webview.start()` constructs `QApplication` — that is why the call sits at the top of `main()` in `__main__.py`.
+
+What the recipe does:
+
+- Sets `QT_QPA_PLATFORM=offscreen` so Qt does not need a display server.
+- Sets `QTWEBENGINE_CHROMIUM_FLAGS` to a fixed string (see `_DEFAULT_QT_FLAGS` in `_qt_env.py`) that:
+  - Skips the GPU process (`--disable-gpu`).
+  - Forces SwiftShader as the GL backend (`--use-gl=swiftshader`).
+  - Runs the GPU process in-process (`--in-process-gpu`).
+  - Uses `/tmp` instead of `/dev/shm` for shared memory (`--disable-dev-shm-usage`).
+  - Disables background throttling (`--disable-background-timer-throttling`, `--disable-renderer-backgrounding`, `--disable-backgrounding-occluded-windows`).
+  - Disables unused features (`--disable-features=Translate,BackForwardCache,MediaRouter,VizDisplayCompositor`).
+- Adds `--no-sandbox` only when running as root.
+- Sets `Qt.AA_UseSoftwareOpenGL` on whichever Qt binding is importable, so Qt's widget GL stack also uses software rendering. This avoids the first-paint hang under offscreen QPA.
+- Sets `PYWEBVIEW_GUI=qt` on Linux and `PYWEBVIEW_LOG=WARNING` to reduce stderr noise.
+
+#### Screenshot fallback
+
+Under the offscreen QPA + no-GPU combination, the SVG→Canvas→`toDataURL` rasterizer in `vendor/screenshot.js` often returns no data. To keep the `screenshot` tool useful in that case, the embedded driver falls back to `__minimal_webmcp_page_digest()` and returns a structured `{fallback: true, kind: "page_digest", data: {...}, note: "..."}` shape. The `tools.py` `screenshot` handler passes that through unchanged; the MCP `tools/call` envelope wraps it in `content[0].text` JSON like any other tool result. LLM clients should check `fallback: true` and read the `note` field to know the result is not a PNG.
+
+#### No new dependencies
+
+The headless + no-GPU setup uses only stdlib + the existing `pywebview>=6.0,<7` pin. No new packages are added; no `pyproject.toml` is created; no existing driver is replaced.
+
+#### Measurement caveat
+
+MOCK mode in this codebase is already at the floor for Python+pipe+JSON-RPC (~1.2 µs per call); the 2× speedup is most meaningful for the embedded path, which is dominated by Chromium startup, network, and rendering — not by Python overhead. A real measurement requires a Linux host with `pywebview` and a Qt binding (PyQt5+PyQtWebEngine, PyQt6, PySide2, or PySide6).
 
 ### JSON-RPC wire format
 

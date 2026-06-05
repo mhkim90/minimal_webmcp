@@ -60,4 +60,24 @@
       throw new Error('screenshot failed: ' + e.message);
     }
   };
+
+  // Fallback for headless + no-GPU mode: the canvas pipeline above often
+  // returns no data under offscreen QPA + --disable-gpu (the WebEngine
+  // rasterizer is stubbed). When that happens the EmbeddedDriver.screenshot
+  // method calls this function instead. Returns a plain object (NOT a
+  // base64 string) so the driver can detect the fallback by type.
+  window.__minimal_webmcp_page_digest = function() {
+    const d = document;
+    return {
+      url: location.href,
+      title: d.title,
+      html_bytes: (d.documentElement.outerHTML || '').length,
+      text_chars: (d.body ? d.body.textContent : '').length,
+      iframes: d.querySelectorAll('iframe').length,
+      scripts: d.querySelectorAll('script').length,
+      images: d.querySelectorAll('img').length,
+      viewport: { w: innerWidth, h: innerHeight },
+      scroll: { w: d.documentElement.scrollWidth, h: d.documentElement.scrollHeight },
+    };
+  };
 })();

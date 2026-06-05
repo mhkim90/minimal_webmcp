@@ -96,9 +96,20 @@ class EmbeddedDriver(Driver):
         self._window.events.loaded += _on_loaded
 
     def wait_ready(self, timeout=30):
-        """Block until the initial window load event fires. Worker-thread side."""
-        if not self._ready.wait(timeout=timeout):
-            raise RuntimeError(f"webview: window did not become ready in {timeout}s")
+        """Block until the initial window load event fires. Worker-thread side.
+
+        Headless mode (no GPU, offscreen QPA) needs a longer timeout because
+        cold-start of the WebEngine process and the first paint can take
+        several seconds; the previous 30 s ceiling was too tight for some
+        CI containers.
+        """
+        effective_timeout = timeout
+        if getattr(self, "_headless", False):
+            effective_timeout = max(timeout, 60)
+        if not self._ready.wait(timeout=effective_timeout):
+            raise RuntimeError(
+                f"webview: window did not become ready in {effective_timeout}s"
+            )
         if self._error:
             raise self._error
 
@@ -128,11 +139,32 @@ class EmbeddedDriver(Driver):
         return self._window.evaluate_js(js)
 
     def screenshot(self):
+        """Capture a screenshot. Under offscreen QPA + no GPU, the
+        Canvas.toDataURL pipeline in vendor/screenshot.js often returns
+        no data; in that case fall back to __minimal_webmcp_page_digest(),
+        which returns a structured page-metadata object. The tools layer
+        recognises that shape (fallback: true) and passes it through to
+        the caller with a `note` field, so the API stays honest.
+        """
         self._ensure()
-        b64 = self.evaluate("__minimal_webmcp_screenshot()")
-        if isinstance(b64, str):
+        try:
+            b64 = self.evaluate("__minimal_webmcp_screenshot()")
+        except Exception:
+            b64 = None
+        if isinstance(b64, str) and b64:
             return base64.b64decode(b64)
-        raise RuntimeError("screenshot: no data returned (page may block SVG/canvas)")
+        # Fallback: return a structured page digest. The tools layer
+        # will pass this through the MCP content envelope as-is.
+        digest = self.evaluate("__minimal_webmcp_page_digest()") or {}
+        return {
+            "fallback": True,
+            "kind": "page_digest",
+            "data": digest,
+            "note": (
+                "PNG rasterization unavailable under offscreen QPA + no GPU; "
+                "returned a page digest instead. Use page_info for full metadata."
+            ),
+        }
 
     def send_keys(self, text):
         self._ensure()
