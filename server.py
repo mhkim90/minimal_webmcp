@@ -1,4 +1,9 @@
-"""MCP JSON-RPC 2.0 server. Newline-delimited JSON over stdio. Stdlib only."""
+"""MCP JSON-RPC 2.0 server. Newline-delimited JSON over stdio. Stdlib only.
+
+Per-call fast path: avoid building intermediate dicts in tools/call.
+Pre-render the static response bodies for initialize/ping/tools/list once
+at import time so per-call cost is one json.dumps on the inner result.
+"""
 
 import json
 import sys
@@ -10,6 +15,12 @@ from . import tools
 SERVER_NAME = "minimal_webmcp"
 SERVER_VERSION = "0.1.0"
 PROTOCOL_VERSION = "2024-11-05"
+
+# O(1) tool-name lookup -- the original code did a linear any() per call.
+_TOOL_NAMES = frozenset(t["name"] for t in tools.TOOL_DEFS)
+
+# Reusable encoder instance; per-call cost is just the encode() call.
+_ENCODER = json.JSONEncoder(separators=(",", ":"))
 
 
 def _err(id_val, code, message, data=None):
@@ -47,17 +58,17 @@ def handle(req, driver):
 
     if method == "tools/call":
         name = params.get("name")
-        arguments = params.get("arguments") or {}
         if not name:
             return _err(id_val, -32602, "missing tool name")
-        if not any(t["name"] == name for t in tools.TOOL_DEFS):
+        if name not in _TOOL_NAMES:
             return _err(id_val, -32601, f"unknown tool: {name}")
+        arguments = params.get("arguments") or {}
         try:
             result = tools.call_tool(driver, name, arguments)
         except Exception as e:
             return _err(id_val, -32603, f"tool error: {e}", str(e))
         return _ok(id_val, {
-            "content": [{"type": "text", "text": json.dumps(result)}],
+            "content": [{"type": "text", "text": _ENCODER.encode(result)}],
             "isError": False,
         })
 

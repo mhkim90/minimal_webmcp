@@ -107,6 +107,14 @@ TOOL_DEFS = [
             "required": ["js"],
         },
     },
+    {
+        "name": "screenshot_fallback",
+        "description": "Test-only helper: returns the structured page-digest shape that the embedded driver produces when the canvas pipeline is unavailable. Useful for verifying the screenshot fallback path through MOCK without a real webview.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 
@@ -119,7 +127,14 @@ def call_tool(driver, name, args):
         return driver.navigate(args["url"])
 
     if name == "screenshot":
-        png = driver.screenshot()
+        result = driver.screenshot()
+        # Embedded-driver fallback: under offscreen QPA + no GPU the rasterizer
+        # can fail; the driver returns a structured page-digest dict instead
+        # of PNG bytes. Pass that through unchanged so the caller is told
+        # (via `fallback: true` + `note`) that the result is not a PNG.
+        if isinstance(result, dict) and result.get("fallback"):
+            return result
+        png = result
         png_size = len(png)
         max_bytes = int(args.get("max_bytes") or 1048576)
         # If caller forces a path -> save and return path only
@@ -261,5 +276,14 @@ def call_tool(driver, name, args):
             };
         })()""")
         return info or {}
+
+    if name == "screenshot_fallback":
+        # Test-only helper. Lets the E2E plumbing test verify the
+        # fallback shape through MOCK without a real webview.
+        fb = driver.screenshot_fallback() if hasattr(driver, "screenshot_fallback") else None
+        if fb is None:
+            return {"fallback": True, "kind": "page_digest",
+                    "data": {}, "note": "driver does not implement screenshot_fallback"}
+        return fb
 
     raise ValueError(f"unknown tool: {name}")

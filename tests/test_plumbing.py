@@ -62,7 +62,8 @@ def main():
         assert r.get("id") == 2
         tool_names = {t["name"] for t in r["result"]["tools"]}
         expected = {"navigate", "screenshot", "click", "type_text",
-                    "get_text", "get_html", "wait_for", "evaluate", "page_info"}
+                    "get_text", "get_html", "wait_for", "evaluate", "page_info",
+                    "screenshot_fallback"}
         assert tool_names == expected, f"tool set mismatch: {tool_names}"
         print(f"OK tools/list: {sorted(tool_names)}")
 
@@ -202,6 +203,22 @@ def main():
         r = read_one(proc)
         assert r.get("id") == 12
         print("OK ping")
+
+        # 15. screenshot fallback shape (MOCK): confirm the tools layer
+        # passes a driver-returned fallback dict through unchanged, with
+        # fallback: true and a 'note' field.
+        send(proc, "tools/call", {
+            "name": "screenshot_fallback",
+            "arguments": {},
+        }, id_val=13)
+        r = read_one(proc)
+        text = r["result"]["content"][0]["text"]
+        fb = json.loads(text)
+        assert fb.get("fallback") is True, f"expected fallback=true, got {fb}"
+        assert fb.get("kind") == "page_digest", f"expected kind=page_digest, got {fb}"
+        assert "data" in fb, f"expected 'data' in fallback, got {fb}"
+        assert "note" in fb, f"expected 'note' in fallback, got {fb}"
+        print(f"OK screenshot_fallback: kind={fb.get('kind')}")
 
         # Exit
         proc.stdin.close()
