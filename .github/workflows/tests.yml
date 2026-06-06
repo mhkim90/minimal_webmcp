@@ -9,15 +9,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+      - name: Checkout
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --depth 1 origin "${SHA}"
+          git checkout -q FETCH_HEAD
       - name: Run plumbing tests (MOCK mode)
         env:
           MINIMAL_WEBMCP_MOCK: "1"
