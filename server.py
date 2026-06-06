@@ -129,5 +129,5 @@ def run(driver, stdin=None, stdout=None):
             tb = traceback.format_exc()
             resp = _err(req.get("id"), -32603, f"internal: {e}", tb)
         if resp is not None:
-            stdout.write(json.dumps(resp) + "\n")
+            stdout.write(_ENCODER.encode(resp) + "\n")
             stdout.flush()

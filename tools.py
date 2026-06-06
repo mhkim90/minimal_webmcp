@@ -185,11 +185,32 @@ def call_tool(driver, name, args):
         sel = args["selector"]
         text = args["text"]
         sel_js = _js_str(sel)
-        driver.evaluate(
-            f"(()=>{{const e=document.querySelector({sel_js});"
-            f"if(e){{e.focus();}}}})()"
+        text_js = json.dumps(text)
+        # Single round-trip: focus + type in one IIFE. Saves one
+        # evaluate_js bridge call per type_text (was 2: focus + send_keys).
+        ok = driver.evaluate(
+            f"(()=>{{"
+            f"const e=document.querySelector({sel_js});"
+            f"if(!e)return false;"
+            f"e.focus();"
+            f"const a=document.activeElement;"
+            f"if(!a||!(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable))return false;"
+            f"if(a.tagName==='INPUT'||a.tagName==='TEXTAREA'){{"
+            f"  const proto=a.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype;"
+            f"  const setter=Object.getOwnPropertyDescriptor(proto,'value').set;"
+            f"  setter.call(a,a.value+{text_js});"
+            f"  a.dispatchEvent(new Event('input',{{bubbles:true}}));"
+            f"  a.dispatchEvent(new Event('change',{{bubbles:true}}));"
+            f"}}else{{"
+            f"  document.execCommand('insertText',false,{text_js});"
+            f"}}"
+            f"return true;"
+            f"}})()"
         )
-        driver.send_keys(text)
+        if not ok:
+            raise RuntimeError(
+                f"type_text: element not focusable or not input/textarea/contenteditable: {sel}"
+            )
         return {"ok": True}
 
     if name == "get_text":

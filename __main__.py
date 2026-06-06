@@ -122,7 +122,12 @@ def main(argv=None):
             return int(raw) if raw is not None else default
         except ValueError:
             return default
-    grab_settle_ms = _env_int("MINIMAL_WEBMCP_GRAB_SETTLE_MS", 200)
+    # If the env var is set, use it as-is. Otherwise let the driver pick
+    # a headless-aware default (50ms headless / 200ms real display).
+    if "MINIMAL_WEBMCP_GRAB_SETTLE_MS" in os.environ:
+        grab_settle_ms = _env_int("MINIMAL_WEBMCP_GRAB_SETTLE_MS", 200)
+    else:
+        grab_settle_ms = None
     grab_timeout_ms = _env_int("MINIMAL_WEBMCP_GRAB_TIMEOUT_MS", 5000)
 
     # Headless + no-GPU setup MUST happen before any code path that

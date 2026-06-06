@@ -19,6 +19,14 @@ unsupported — it is incompatible with Python 3.11+ in some installs.
 import time
 
 
+# Process-lifetime window reference cache. The top-level QWidget / QWindow
+# is stable for the process; re-scanning topLevelWidgets() on every grab
+# is O(N) where N is the number of widgets. Cache is invalidated defensively
+# by checking isVisible() on each call -- if the C++ object has been
+# destroyed, the call raises and we fall through to the slow scan.
+_WINDOW_CACHE = {"win": None, "name": None}
+
+
 def _app():
     """Return the live QApplication / QGuiApplication instance, or None."""
     try:
@@ -37,6 +45,13 @@ def _find_window(timeout_s=2.0):
     or (None, None) on failure. Polls briefly because the window may not
     be visible yet at the time of the first call.
     """
+    cached = _WINDOW_CACHE["win"]
+    if cached is not None:
+        try:
+            if cached.isVisible() and cached.width() > 0 and cached.height() > 0:
+                return cached, _WINDOW_CACHE["name"]
+        except Exception:
+            pass
     try:
         from qtpy import QtWidgets, QtGui
     except Exception:
@@ -58,6 +73,8 @@ def _find_window(timeout_s=2.0):
         for w in tops:
             try:
                 if w.isVisible() and w.width() > 0 and w.height() > 0:
+                    _WINDOW_CACHE["win"] = w
+                    _WINDOW_CACHE["name"] = name
                     return w, name
             except Exception:
                 continue
@@ -68,6 +85,8 @@ def _find_window(timeout_s=2.0):
         for win in wins:
             try:
                 if win.isVisible() and win.width() > 0 and win.height() > 0:
+                    _WINDOW_CACHE["win"] = win
+                    _WINDOW_CACHE["name"] = name
                     return win, name
             except Exception:
                 continue
@@ -122,7 +141,7 @@ def grab_window_as_png(settle_ms=200, timeout_ms=5000):
                 app.processEvents()
         except Exception:
             pass
-        time.sleep(0.02)
+        time.sleep(0.005)
     # The actual grab. Qt grab is synchronous, so we measure wall-clock
     # time and treat an over-budget call as a failure (returns None so
     # the caller falls through to the next tier).

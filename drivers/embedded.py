@@ -46,7 +46,7 @@ class EmbeddedDriver(Driver):
     """Uses pywebview to open an OS-native webview. Lazy start, sync evaluate."""
 
     def __init__(self, headless=False, width=1024, height=768, title="minimal_webmcp",
-                 grab_settle_ms=200, grab_timeout_ms=5000):
+                 grab_settle_ms=None, grab_timeout_ms=5000):
         if not _try_import_webview():
             raise RuntimeError(
                 "pywebview not installed. Run: pip install 'pywebview>=6.0,<7'\n"
@@ -56,6 +56,12 @@ class EmbeddedDriver(Driver):
         self._width = width
         self._height = height
         self._title = title
+        # Headless (offscreen QPA, no GPU, no animations) needs a much
+        # shorter paint-settle delay: the page is settled the moment the
+        # grab fires, because nothing is animating. On a real display
+        # server with possible animations, keep the original 200ms.
+        if grab_settle_ms is None:
+            grab_settle_ms = 30 if headless else 200
         self._grab_settle_ms = grab_settle_ms
         self._grab_timeout_ms = grab_timeout_ms
         self._window = None
@@ -126,13 +132,16 @@ class EmbeddedDriver(Driver):
     def navigate(self, url):
         self._ensure()
         self._window.load_url(url)
-        # Wait for load by polling get_current_url
+        # Wait for load by polling get_current_url (pywebview native
+        # call, not a JS bridge). For 8776's heavy inline-HTML page the
+        # URL changes within ~10ms of load_url, so a single poll usually
+        # resolves the wait immediately. Then one evaluate for the title.
         deadline = time.time() + 30
         while time.time() < deadline:
             cur = self._window.get_current_url()
             if cur and cur != "about:blank":
                 break
-            time.sleep(0.1)
+            time.sleep(0.05)
         title = self.evaluate("document.title") or ""
         return {"url": url, "title": title}
 
@@ -199,18 +208,6 @@ class EmbeddedDriver(Driver):
                 "returned a page digest instead. Use page_info for full metadata."
             ),
         }, 0)
-        # Fallback: return a structured page digest. The tools layer
-        # will pass this through the MCP content envelope as-is.
-        digest = self.evaluate("__minimal_webmcp_page_digest()") or {}
-        return {
-            "fallback": True,
-            "kind": "page_digest",
-            "data": digest,
-            "note": (
-                "PNG rasterization unavailable under offscreen QPA + no GPU; "
-                "returned a page digest instead. Use page_info for full metadata."
-            ),
-        }
 
     def send_keys(self, text):
         self._ensure()
