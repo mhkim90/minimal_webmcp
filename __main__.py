@@ -44,13 +44,15 @@ def _install_hint():
     return "pip install --user pywebview"
 
 
-def _run_embedded(headless, grab_settle_ms=200, grab_timeout_ms=5000):
+def _run_embedded(headless, grab_settle_ms=200, grab_timeout_ms=5000,
+                  navigate_wait_for_load=False):
     """Embedded mode: webview.start() runs the GUI on the main thread (pywebview 6.x
     requirement), and server.run() runs in a worker thread started by webview."""
     try:
         driver = make_driver("embedded", headless=headless,
                              grab_settle_ms=grab_settle_ms,
-                             grab_timeout_ms=grab_timeout_ms)
+                             grab_timeout_ms=grab_timeout_ms,
+                             navigate_wait_for_load=navigate_wait_for_load)
     except Exception as e:
         sys.stderr.write(f"minimal_webmcp: cannot create embedded driver: {e}\n")
         if "pywebview" in str(e).lower() or "No module named 'webview'" in str(e):
@@ -122,8 +124,22 @@ def main(argv=None):
             return int(raw) if raw is not None else default
         except ValueError:
             return default
-    grab_settle_ms = _env_int("MINIMAL_WEBMCP_GRAB_SETTLE_MS", 200)
+    # If the env var is set, use it as-is. Otherwise let the driver pick
+    # a headless-aware default (50ms headless / 200ms real display).
+    if "MINIMAL_WEBMCP_GRAB_SETTLE_MS" in os.environ:
+        grab_settle_ms = _env_int("MINIMAL_WEBMCP_GRAB_SETTLE_MS", 200)
+    else:
+        grab_settle_ms = None
     grab_timeout_ms = _env_int("MINIMAL_WEBMCP_GRAB_TIMEOUT_MS", 5000)
+
+    # Navigate `wait_for_load` default (env var, optional). Set to 1
+    # for SPAs / heavy pages; 0 (default) for fast URL-poll behavior.
+    def _env_bool(name, default):
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return raw in ("1", "true", "yes", "on")
+    navigate_wait_for_load = _env_bool("MINIMAL_WEBMCP_NAVIGATE_WAIT_FOR_LOAD", False)
 
     # Headless + no-GPU setup MUST happen before any code path that
     # could import pywebview or construct QApplication. See _qt_env docstring.
@@ -140,7 +156,8 @@ def main(argv=None):
 
     # Default: embedded pywebview on main thread, server in worker.
     return _run_embedded(headless, grab_settle_ms=grab_settle_ms,
-                         grab_timeout_ms=grab_timeout_ms)
+                         grab_timeout_ms=grab_timeout_ms,
+                         navigate_wait_for_load=navigate_wait_for_load)
 
 
 if __name__ == "__main__":

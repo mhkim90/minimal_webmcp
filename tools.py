@@ -9,11 +9,13 @@ from pathlib import Path
 TOOL_DEFS = [
     {
         "name": "navigate",
-        "description": "Navigate the browser to a URL. Returns the final URL and page title.",
+        "description": "Navigate the browser to a URL. Returns the final URL and page title. Default waits for URL change only (fast, works for vanilla HTML). Set wait_for_load=true to wait for the page's `load` event (slower, correct for SPAs and pages with heavy subresources).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "URL to navigate to"},
+                "wait_for_load": {"type": "boolean", "default": False,
+                    "description": "Wait for the `load` event (not just URL change). Use for SPAs and pages with heavy subresources. Default false = URL change only (fast)."},
             },
             "required": ["url"],
         },
@@ -124,7 +126,8 @@ def _js_str(s):
 
 def call_tool(driver, name, args):
     if name == "navigate":
-        return driver.navigate(args["url"])
+        return driver.navigate(args["url"],
+                               wait_for_load=args.get("wait_for_load"))
 
     if name == "screenshot":
         result = driver.screenshot()
@@ -185,11 +188,32 @@ def call_tool(driver, name, args):
         sel = args["selector"]
         text = args["text"]
         sel_js = _js_str(sel)
-        driver.evaluate(
-            f"(()=>{{const e=document.querySelector({sel_js});"
-            f"if(e){{e.focus();}}}})()"
+        text_js = json.dumps(text)
+        # Single round-trip: focus + type in one IIFE. Saves one
+        # evaluate_js bridge call per type_text (was 2: focus + send_keys).
+        ok = driver.evaluate(
+            f"(()=>{{"
+            f"const e=document.querySelector({sel_js});"
+            f"if(!e)return false;"
+            f"e.focus();"
+            f"const a=document.activeElement;"
+            f"if(!a||!(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.isContentEditable))return false;"
+            f"if(a.tagName==='INPUT'||a.tagName==='TEXTAREA'){{"
+            f"  const proto=a.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype;"
+            f"  const setter=Object.getOwnPropertyDescriptor(proto,'value').set;"
+            f"  setter.call(a,a.value+{text_js});"
+            f"  a.dispatchEvent(new Event('input',{{bubbles:true}}));"
+            f"  a.dispatchEvent(new Event('change',{{bubbles:true}}));"
+            f"}}else{{"
+            f"  document.execCommand('insertText',false,{text_js});"
+            f"}}"
+            f"return true;"
+            f"}})()"
         )
-        driver.send_keys(text)
+        if not ok:
+            raise RuntimeError(
+                f"type_text: element not focusable or not input/textarea/contenteditable: {sel}"
+            )
         return {"ok": True}
 
     if name == "get_text":

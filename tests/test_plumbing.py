@@ -80,6 +80,23 @@ def main():
         assert result["title"] == "Mock Page"
         print(f"OK navigate: {result}")
 
+        # 4b. tools/call navigate with wait_for_load=true (MOCK ignores
+        # the flag but must accept the kwarg without erroring). The
+        # embedded driver uses load-event promise when this is set;
+        # MOCK just returns the canned shape.
+        send(proc, "tools/call", {
+            "name": "navigate",
+            "arguments": {"url": "https://example.com/spa", "wait_for_load": True},
+        }, id_val=31)
+        r = read_one(proc)
+        assert r.get("id") == 31
+        assert "result" in r, f"navigate(wait_for_load=true) failed: {r}"
+        text = r["result"]["content"][0]["text"]
+        result = json.loads(text)
+        assert result["url"] == "https://example.com/spa"
+        assert result["title"] == "Mock Page"
+        print(f"OK navigate(wait_for_load=true): {result}")
+
         # 5. tools/call evaluate
         send(proc, "tools/call", {
             "name": "evaluate",
