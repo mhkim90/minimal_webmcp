@@ -13,7 +13,7 @@ from . import tools
 
 
 SERVER_NAME = "minimal_webmcp"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 # O(1) tool-name lookup -- the original code did a linear any() per call.
