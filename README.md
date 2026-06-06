@@ -140,6 +140,8 @@ python3 -m minimal_webmcp --print-install
 | `PYWEBVIEW_GUI=qt` | Force the Qt renderer (Linux only). The headless recipe sets this automatically. |
 | `PYWEBVIEW_LOG=INFO\|WARNING\|debug` | pywebview log level. Default `INFO`. The headless recipe sets `WARNING` automatically. |
 | `MINIMAL_WEBMCP_QT_FLAGS="..."` | Override the default Chromium flag recipe (only used when this env var is unset). |
+| `MINIMAL_WEBMCP_GRAB_SETTLE_MS` | Paint-settle delay (ms) before `QPixmap.grab()` in the embedded screenshot path. Default `200`. Increase on slow hosts where the grab returns a blank pixmap. |
+| `MINIMAL_WEBMCP_GRAB_TIMEOUT_MS` | Hard wall-clock cap (ms) on a single `QPixmap.grab()` call. Default `5000`. If exceeded, the embedded driver falls through to the page-digest fallback instead of blocking the JSON-RPC loop. |
 
 ### Headless + no-GPU
 
@@ -159,13 +161,29 @@ What the recipe does:
 - Sets `Qt.AA_UseSoftwareOpenGL` on whichever Qt binding is importable, so Qt's widget GL stack also uses software rendering. This avoids the first-paint hang under offscreen QPA.
 - Sets `PYWEBVIEW_GUI=qt` on Linux and `PYWEBVIEW_LOG=WARNING` to reduce stderr noise.
 
-#### Screenshot fallback
+#### Screenshot rendering tiers
 
-Under the offscreen QPA + no-GPU combination, the SVG→Canvas→`toDataURL` rasterizer in `vendor/screenshot.js` often returns no data. To keep the `screenshot` tool useful in that case, the embedded driver falls back to `__minimal_webmcp_page_digest()` and returns a structured `{fallback: true, kind: "page_digest", data: {...}, note: "..."}` shape. The `tools.py` `screenshot` handler passes that through unchanged; the MCP `tools/call` envelope wraps it in `content[0].text` JSON like any other tool result. LLM clients should check `fallback: true` and read the `note` field to know the result is not a PNG.
+The embedded `screenshot` tool tries three render paths, in order, and returns the first one that yields a usable PNG. This is what makes a real PNG reachable under the offscreen QPA + no-GPU combination, where the WebEngine canvas rasterizer is stubbed:
+
+1. **JS canvas path** — `vendor/screenshot.js` builds an SVG `foreignObject` of the DOM, draws it onto a 2D canvas, and calls `canvas.toDataURL('image/png')`. Works on a real display server (X11 / Wayland) but typically returns no data under offscreen QPA + `--disable-gpu`.
+2. **Qt-native grab** (`drivers/qt_grab.py`) — calls `QPixmap.grab()` on the top-level pywebview window (or `QWindow.grabWindow()` for QML backends), then encodes the pixmap to PNG via `QBuffer`. Works under `QT_QPA_PLATFORM=offscreen` because that QPA was designed exactly for "render Qt widgets to pixmap" use cases. Binding-agnostic via `qtpy` (a pywebview dependency), so it works with PySide6, PyQt6, or PyQt5. PySide2 is unsupported — it is incompatible with Python 3.11+ on some installs.
+3. **Page-digest fallback** — `__minimal_webmcp_page_digest()` returns a structured `{fallback: true, kind: "page_digest", data: {...}, note: "..."}` object. Always works; use this as the floor when no real PNG is reachable.
+
+The MCP `tools/call` envelope uses a different content type for each outcome so the LLM client can tell them apart at a glance:
+
+- PNG returned (tier 1 or 2): `content[0] = {"type": "image", "data": "<base64>", "mimeType": "image/png"}` — the canonical MCP image content; modern clients (opencode, Claude desktop, etc.) render this inline.
+- PNG unreachable (tier 3): `content[0] = {"type": "text", "text": "[FALLBACK] PNG unavailable; page digest returned.\n\n<json>"}` — the `[FALLBACK]` prefix in the first line is the visible signal; the JSON block that follows is the page-digest dict. `isError` is `false` because the call succeeded; the result is just degraded.
+
+#### Screenshot tuning
+
+Two env vars tune the Qt-native grab:
+
+- `MINIMAL_WEBMCP_GRAB_SETTLE_MS` (default `200`) — paint-settle loop duration. Some WebEngine pages finish painting after `loaded` fires; the loop lets the GPU/CPU pipeline catch up before the grab. Increase on slow hosts where the grab returns a blank pixmap.
+- `MINIMAL_WEBMCP_GRAB_TIMEOUT_MS` (default `5000`) — hard wall-clock cap on a single `grab()` call. If the grab runs longer than this, the embedded driver treats it as a failure and falls through to the page-digest tier instead of blocking the JSON-RPC loop.
 
 #### No new dependencies
 
-The headless + no-GPU setup uses only stdlib + the existing `pywebview>=6.0,<7` pin. No new packages are added; no `pyproject.toml` is created; no existing driver is replaced.
+The grab helper uses `qtpy`, which is already a transitive dependency of `pywebview`. No new packages are added; no `pyproject.toml` is created; no existing driver is replaced.
 
 #### Measurement caveat
 
@@ -198,7 +216,7 @@ All tools are listed in `tools.TOOL_DEFS` and dispatched by `server.py`. Tool-na
 | Name | Required params | Optional params | Returns | Notes |
 |------|-----------------|-----------------|---------|-------|
 | `navigate` | `url` | — | `{url, title}` | Polls until page leaves `about:blank` (max 30 s). |
-| `screenshot` | — | `path`, `inline`, `max_bytes` | `{data, size}` or `{saved_to, size}` | PNG. Default threshold for inline base64: 1 MB. If `path` is set, saves to that file. If `inline=true`, always returns base64. If omitted and PNG > `max_bytes`, auto-saves to `/tmp/minimal_webmcp_shot_<ms>.png`. |
+| `screenshot` | — | `path`, `inline`, `max_bytes` | MCP `type:"image"` (PNG) or `type:"text"` with `[FALLBACK]` prefix (page digest) | 3-tier render: JS canvas → `QPixmap.grab()` → page-digest. On a real PNG, returns proper MCP image content (`mimeType: image/png`) so modern clients render inline. On a degraded result, returns a text content whose first line is `[FALLBACK]` so the LLM sees the signal without parsing. `path` saves to a file and returns a text meta; `inline=true` returns a text content with base64. Default threshold for inline base64: 1 MB; larger PNGs auto-save to `/tmp/minimal_webmcp_shot_<ms>.png`. |
 | `click` | `selector` | — | `{ok: true}` | Raises `RuntimeError` if selector not found. |
 | `type_text` | `selector`, `text` | — | `{ok: true}` | Focuses element then sends keys; uses the React-compatible native `value` setter for `INPUT`/`TEXTAREA`. |
 | `get_text` | — | `selector`, `full` | `{text, size, truncated?}` | `textContent`. Caps at 100 K chars; returns first 50 K + total size if larger. Set `full=true` to skip the cap. |

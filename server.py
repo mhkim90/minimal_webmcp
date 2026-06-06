@@ -67,6 +67,35 @@ def handle(req, driver):
             result = tools.call_tool(driver, name, arguments)
         except Exception as e:
             return _err(id_val, -32603, f"tool error: {e}", str(e))
+        # The screenshot tool may return a 3-tuple (kind, payload, size)
+        # so the MCP envelope can use the proper content type. Other
+        # tools return plain dicts/lists and keep the default text wrap.
+        if isinstance(result, tuple) and len(result) == 3:
+            kind, payload, size = result
+            if kind == "image":
+                import base64 as _b64
+                return _ok(id_val, {
+                    "content": [{
+                        "type": "image",
+                        "data": _b64.b64encode(payload).decode("ascii"),
+                        "mimeType": "image/png",
+                    }],
+                    "isError": False,
+                })
+            if kind == "text_fallback":
+                # Surface the fallback loudly: a `[FALLBACK]` prefix in the
+                # text is the first thing an LLM client renders, and the
+                # payload is appended as a JSON block for machine parsing.
+                # isError is false because the call succeeded -- the result
+                # is just degraded.
+                return _ok(id_val, {
+                    "content": [{
+                        "type": "text",
+                        "text": "[FALLBACK] PNG unavailable; page digest returned.\n\n"
+                                 + _ENCODER.encode(payload),
+                    }],
+                    "isError": False,
+                })
         return _ok(id_val, {
             "content": [{"type": "text", "text": _ENCODER.encode(result)}],
             "isError": False,

@@ -128,27 +128,36 @@ def call_tool(driver, name, args):
 
     if name == "screenshot":
         result = driver.screenshot()
-        # Embedded-driver fallback: under offscreen QPA + no GPU the rasterizer
-        # can fail; the driver returns a structured page-digest dict instead
-        # of PNG bytes. Pass that through unchanged so the caller is told
-        # (via `fallback: true` + `note`) that the result is not a PNG.
-        if isinstance(result, dict) and result.get("fallback"):
+        # The driver now returns a 3-tuple: ("image"|"text_fallback", payload, size).
+        # server.py uses the kind to pick the MCP content type:
+        #   - "image"         -> type:"image", data:base64, mimeType:"image/png"
+        #   - "text_fallback" -> type:"text", text:"[FALLBACK] ...\n\n<dict>"
+        # If the user asked for a `path` or `inline=true`, we still return a
+        # plain dict so server.py wraps it in the default text content type
+        # (those are metadata responses, not images).
+        if isinstance(result, tuple) and len(result) == 3 and result[0] == "text_fallback":
+            return result  # server wraps with [FALLBACK] prefix
+        if isinstance(result, tuple) and len(result) == 3 and result[0] == "image":
+            png = result[1]
+            png_size = result[2]
+        elif isinstance(result, dict) and result.get("fallback"):
+            # Back-compat for any driver that still returns a dict directly.
             return result
-        png = result
-        png_size = len(png)
+        else:
+            png = result
+            png_size = len(png)
         max_bytes = int(args.get("max_bytes") or 1048576)
-        # If caller forces a path -> save and return path only
+        # If caller forces a path -> save and return path only (text meta).
         if args.get("path"):
             p = Path(args["path"])
             p.write_bytes(png)
             return {"saved_to": str(p), "size": png_size}
-        # If caller forces inline -> return base64
+        # If caller forces inline -> return base64 (text meta).
         if args.get("inline"):
             return {"data": base64.b64encode(png).decode("ascii"), "size": png_size}
-        # Auto: small enough -> inline; too big -> auto-save to /tmp
+        # Auto: small enough -> return as MCP image content; too big -> auto-save.
         if png_size <= max_bytes:
-            return {"data": base64.b64encode(png).decode("ascii"), "size": png_size}
-        # Auto-save
+            return ("image", png, png_size)
         import tempfile, os
         tmpdir = tempfile.gettempdir()
         fname = f"minimal_webmcp_shot_{int(time.time()*1000)}.png"
@@ -279,11 +288,14 @@ def call_tool(driver, name, args):
 
     if name == "screenshot_fallback":
         # Test-only helper. Lets the E2E plumbing test verify the
-        # fallback shape through MOCK without a real webview.
+        # fallback shape through MOCK without a real webview. Wrapped in
+        # a ("text_fallback", ...) tuple so the server layer applies the
+        # `[FALLBACK]` text-content prefix consistently with the real
+        # embedded driver's degraded-result path.
         fb = driver.screenshot_fallback() if hasattr(driver, "screenshot_fallback") else None
         if fb is None:
-            return {"fallback": True, "kind": "page_digest",
-                    "data": {}, "note": "driver does not implement screenshot_fallback"}
-        return fb
+            fb = {"fallback": True, "kind": "page_digest",
+                  "data": {}, "note": "driver does not implement screenshot_fallback"}
+        return ("text_fallback", fb, 0)
 
     raise ValueError(f"unknown tool: {name}")
