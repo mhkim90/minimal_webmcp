@@ -140,8 +140,9 @@ python3 -m minimal_webmcp --print-install
 | `PYWEBVIEW_GUI=qt` | Force the Qt renderer (Linux only). The headless recipe sets this automatically. |
 | `PYWEBVIEW_LOG=INFO\|WARNING\|debug` | pywebview log level. Default `INFO`. The headless recipe sets `WARNING` automatically. |
 | `MINIMAL_WEBMCP_QT_FLAGS="..."` | Override the default Chromium flag recipe (only used when this env var is unset). |
-| `MINIMAL_WEBMCP_GRAB_SETTLE_MS` | Paint-settle delay (ms) before `QPixmap.grab()` in the embedded screenshot path. Default `200`. Increase on slow hosts where the grab returns a blank pixmap. |
+| `MINIMAL_WEBMCP_GRAB_SETTLE_MS` | Paint-settle delay (ms) before `QPixmap.grab()` in the embedded screenshot path. Default `200` on a real display, `30` in headless. Increase on slow hosts where the grab returns a blank pixmap. |
 | `MINIMAL_WEBMCP_GRAB_TIMEOUT_MS` | Hard wall-clock cap (ms) on a single `QPixmap.grab()` call. Default `5000`. If exceeded, the embedded driver falls through to the page-digest fallback instead of blocking the JSON-RPC loop. |
+| `MINIMAL_WEBMCP_NAVIGATE_WAIT_FOR_LOAD` | `0` (default) = `navigate` returns on URL change only (fast, works for vanilla HTML like the ToyPyResist Job Runner). `1` = `navigate` polls until the new page is fully loaded (URL change + `readyState=complete` + non-empty title) — slower, correct for SPAs and pages with heavy subresources where URL change happens before the page is actually ready. Can be overridden per call via the MCP `navigate` tool's `wait_for_load` arg. |
 
 ### Headless + no-GPU
 
@@ -215,7 +216,7 @@ All tools are listed in `tools.TOOL_DEFS` and dispatched by `server.py`. Tool-na
 
 | Name | Required params | Optional params | Returns | Notes |
 |------|-----------------|-----------------|---------|-------|
-| `navigate` | `url` | — | `{url, title}` | Polls until page leaves `about:blank` (max 30 s). |
+| `navigate` | `url` | `wait_for_load` (bool, default `false`) | `{url, title}` | Polls until page leaves `about:blank` (max 30 s). Default waits for URL change only (fast). Set `wait_for_load=true` to also wait for the new page's `load` event (slower, correct for SPAs and pages with heavy subresources). The default is the `MINIMAL_WEBMCP_NAVIGATE_WAIT_FOR_LOAD` env var (`0`/`1`). |
 | `screenshot` | — | `path`, `inline`, `max_bytes` | MCP `type:"image"` (PNG) or `type:"text"` with `[FALLBACK]` prefix (page digest) | 3-tier render: JS canvas → `QPixmap.grab()` → page-digest. On a real PNG, returns proper MCP image content (`mimeType: image/png`) so modern clients render inline. On a degraded result, returns a text content whose first line is `[FALLBACK]` so the LLM sees the signal without parsing. `path` saves to a file and returns a text meta; `inline=true` returns a text content with base64. Default threshold for inline base64: 1 MB; larger PNGs auto-save to `/tmp/minimal_webmcp_shot_<ms>.png`. |
 | `click` | `selector` | — | `{ok: true}` | Raises `RuntimeError` if selector not found. |
 | `type_text` | `selector`, `text` | — | `{ok: true}` | Focuses element then sends keys; uses the React-compatible native `value` setter for `INPUT`/`TEXTAREA`. |

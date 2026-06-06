@@ -10,7 +10,7 @@ class MockDriver(Driver):
         self._title = "Mock Page"
         self._url = "about:blank"
 
-    def navigate(self, url):
+    def navigate(self, url, wait_for_load=False):
         self._url = url
         return {"url": url, "title": self._title}
 

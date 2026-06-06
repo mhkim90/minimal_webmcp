@@ -9,11 +9,13 @@ from pathlib import Path
 TOOL_DEFS = [
     {
         "name": "navigate",
-        "description": "Navigate the browser to a URL. Returns the final URL and page title.",
+        "description": "Navigate the browser to a URL. Returns the final URL and page title. Default waits for URL change only (fast, works for vanilla HTML). Set wait_for_load=true to wait for the page's `load` event (slower, correct for SPAs and pages with heavy subresources).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "URL to navigate to"},
+                "wait_for_load": {"type": "boolean", "default": False,
+                    "description": "Wait for the `load` event (not just URL change). Use for SPAs and pages with heavy subresources. Default false = URL change only (fast)."},
             },
             "required": ["url"],
         },
@@ -124,7 +126,8 @@ def _js_str(s):
 
 def call_tool(driver, name, args):
     if name == "navigate":
-        return driver.navigate(args["url"])
+        return driver.navigate(args["url"],
+                               wait_for_load=args.get("wait_for_load"))
 
     if name == "screenshot":
         result = driver.screenshot()

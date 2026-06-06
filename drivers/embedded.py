@@ -46,7 +46,8 @@ class EmbeddedDriver(Driver):
     """Uses pywebview to open an OS-native webview. Lazy start, sync evaluate."""
 
     def __init__(self, headless=False, width=1024, height=768, title="minimal_webmcp",
-                 grab_settle_ms=None, grab_timeout_ms=5000):
+                 grab_settle_ms=None, grab_timeout_ms=5000,
+                 navigate_wait_for_load=False):
         if not _try_import_webview():
             raise RuntimeError(
                 "pywebview not installed. Run: pip install 'pywebview>=6.0,<7'\n"
@@ -64,6 +65,9 @@ class EmbeddedDriver(Driver):
             grab_settle_ms = 30 if headless else 200
         self._grab_settle_ms = grab_settle_ms
         self._grab_timeout_ms = grab_timeout_ms
+        # Default for the navigate() `wait_for_load` arg. Per-call arg
+        # in MCP `navigate(wait_for_load=...)` overrides this.
+        self._navigate_wait_for_load = bool(navigate_wait_for_load)
         self._window = None
         self._ready = threading.Event()
         self._error = None
@@ -129,13 +133,40 @@ class EmbeddedDriver(Driver):
                 "and webview.start() must be running before tool calls."
             )
 
-    def navigate(self, url):
+    def navigate(self, url, wait_for_load=None):
         self._ensure()
+        # None = defer to the driver's startup default (set from
+        # MINIMAL_WEBMCP_NAVIGATE_WAIT_FOR_LOAD). True/False = explicit.
+        if wait_for_load is None:
+            wait_for_load = self._navigate_wait_for_load
         self._window.load_url(url)
-        # Wait for load by polling get_current_url (pywebview native
-        # call, not a JS bridge). For 8776's heavy inline-HTML page the
-        # URL changes within ~10ms of load_url, so a single poll usually
-        # resolves the wait immediately. Then one evaluate for the title.
+        if wait_for_load:
+            # Wait for the new page to be fully loaded, not just for the
+            # URL to change. Polls in Python: URL change (cheap C++ call)
+            # first, then a JS evaluate to check readyState + title. The
+            # title-non-empty check rejects the intermediate blank doc
+            # that Qt WebEngine creates during reload (the blank doc is
+            # itself readyState=complete with an empty title).
+            # pywebview's evaluate_js does NOT await Promises on this
+            # stack, so JS-side polling via `new Promise(...)` is not
+            # an option -- poll from Python instead.
+            deadline = time.time() + 30
+            title = ""
+            while time.time() < deadline:
+                cur = self._window.get_current_url()
+                if cur and cur != "about:blank":
+                    state = self.evaluate(
+                        "(()=>({r:document.readyState,t:document.title||''}))()"
+                    ) or {}
+                    if state.get("r") == "complete" and state.get("t"):
+                        title = state["t"]
+                        break
+                time.sleep(0.05)
+            return {"url": url, "title": title}
+        # Default: URL poll (fast for vanilla HTML / 8776-class targets).
+        # get_current_url() is a pywebview C++ call, not a JS bridge, so
+        # the poll is cheap. URL change happens within ~10ms of load_url
+        # for single-file pages; first poll usually exits immediately.
         deadline = time.time() + 30
         while time.time() < deadline:
             cur = self._window.get_current_url()
