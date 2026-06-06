@@ -45,7 +45,8 @@ def _find_screenshot_js():
 class EmbeddedDriver(Driver):
     """Uses pywebview to open an OS-native webview. Lazy start, sync evaluate."""
 
-    def __init__(self, headless=False, width=1024, height=768, title="minimal_webmcp"):
+    def __init__(self, headless=False, width=1024, height=768, title="minimal_webmcp",
+                 grab_settle_ms=200, grab_timeout_ms=5000):
         if not _try_import_webview():
             raise RuntimeError(
                 "pywebview not installed. Run: pip install 'pywebview>=6.0,<7'\n"
@@ -55,6 +56,8 @@ class EmbeddedDriver(Driver):
         self._width = width
         self._height = height
         self._title = title
+        self._grab_settle_ms = grab_settle_ms
+        self._grab_timeout_ms = grab_timeout_ms
         self._window = None
         self._ready = threading.Event()
         self._error = None
@@ -139,20 +142,63 @@ class EmbeddedDriver(Driver):
         return self._window.evaluate_js(js)
 
     def screenshot(self):
-        """Capture a screenshot. Under offscreen QPA + no GPU, the
-        Canvas.toDataURL pipeline in vendor/screenshot.js often returns
-        no data; in that case fall back to __minimal_webmcp_page_digest(),
-        which returns a structured page-metadata object. The tools layer
-        recognises that shape (fallback: true) and passes it through to
-        the caller with a `note` field, so the API stays honest.
+        """3-tier screenshot. Returns a (kind, payload, size) tuple:
+
+        - ("image", png_bytes, size)         on a real PNG capture
+        - ("text_fallback", dict, 0)         on a degraded result (page
+                                              digest dict; tools layer
+                                              surfaces it as a `[FALLBACK]`
+                                              text content with isError=false)
+
+        Tiers, in order:
+          1. JS `__minimal_webmcp_screenshot()` (canvas.toDataURL). May
+             fail or return empty under offscreen QPA + no GPU because
+             the WebEngine canvas rasterizer is stubbed. Skipped when
+             running headless (offscreen QPA): the canvas pipeline can
+             abort the process at the C++ level, and the Python
+             try/except cannot catch that. The Qt grab tier is a
+             strictly better choice in that mode.
+          2. Qt-native `QPixmap.grab()` on the top-level window. Works
+             under offscreen QPA because that QPA was designed for
+             "render Qt widgets to pixmap" use cases.
+          3. `__minimal_webmcp_page_digest()` — always works, returns
+             a structured page-metadata dict instead of an image.
         """
         self._ensure()
+        # Tier 1: JS canvas path. Only attempted when we have a real
+        # display server (non-headless mode). Under offscreen QPA the
+        # canvas pipeline can abort the process, which would skip the
+        # Qt grab fallback below.
+        if not self._headless:
+            try:
+                b64 = self.evaluate("__minimal_webmcp_screenshot()")
+                if isinstance(b64, str) and b64:
+                    png = base64.b64decode(b64)
+                    if len(png) > 100:
+                        return ("image", png, len(png))
+            except Exception:
+                pass
+        # Tier 2: Qt-native grab (new). Bypasses the WebEngine canvas
+        # pipeline entirely; uses Qt's own widget render path.
         try:
-            b64 = self.evaluate("__minimal_webmcp_screenshot()")
+            from .qt_grab import grab_window_as_png
+            png = grab_window_as_png(settle_ms=self._grab_settle_ms,
+                                     timeout_ms=self._grab_timeout_ms)
+            if png:
+                return ("image", png, len(png))
         except Exception:
-            b64 = None
-        if isinstance(b64, str) and b64:
-            return base64.b64decode(b64)
+            pass
+        # Tier 3: page-digest fallback (existing). Guaranteed to work.
+        digest = self.evaluate("__minimal_webmcp_page_digest()") or {}
+        return ("text_fallback", {
+            "fallback": True,
+            "kind": "page_digest",
+            "data": digest,
+            "note": (
+                "PNG unavailable under offscreen QPA + no GPU; "
+                "returned a page digest instead. Use page_info for full metadata."
+            ),
+        }, 0)
         # Fallback: return a structured page digest. The tools layer
         # will pass this through the MCP content envelope as-is.
         digest = self.evaluate("__minimal_webmcp_page_digest()") or {}

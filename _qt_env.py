@@ -98,5 +98,16 @@ def configure_qt_for_headless(headless: bool) -> None:
     if sys.platform.startswith("linux"):
         os.environ.setdefault("PYWEBVIEW_GUI", "qt")
     os.environ.setdefault("PYWEBVIEW_LOG", "WARNING")
+    # Force software rendering for the Qt Quick / RHI / OpenGL stacks.
+    # Without these, QtWebEngine can try to acquire a GL context from a
+    # background thread (the worker that runs the JSON-RPC loop) and
+    # abort the process with "Cannot make QOpenGLContext current in a
+    # different thread" -- which is fatal and cannot be caught from
+    # Python. The Qt grab helper in drivers/qt_grab.py uses QPixmap
+    # directly and works fine under software rendering; the offscreen
+    # QPA platform is designed for it.
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    os.environ.setdefault("QSG_RHI_BACKEND", "software")
+    os.environ.setdefault("QT_OPENGL", "software")
     _try_set_aa_software_opengl()
     _note_alias_once()

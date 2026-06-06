@@ -44,11 +44,13 @@ def _install_hint():
     return "pip install --user pywebview"
 
 
-def _run_embedded(headless):
+def _run_embedded(headless, grab_settle_ms=200, grab_timeout_ms=5000):
     """Embedded mode: webview.start() runs the GUI on the main thread (pywebview 6.x
     requirement), and server.run() runs in a worker thread started by webview."""
     try:
-        driver = make_driver("embedded", headless=headless)
+        driver = make_driver("embedded", headless=headless,
+                             grab_settle_ms=grab_settle_ms,
+                             grab_timeout_ms=grab_timeout_ms)
     except Exception as e:
         sys.stderr.write(f"minimal_webmcp: cannot create embedded driver: {e}\n")
         if "pywebview" in str(e).lower() or "No module named 'webview'" in str(e):
@@ -111,6 +113,18 @@ def main(argv=None):
         or os.environ.get("MINIMAL_MCP_HEADLESS") == "1"
     )
 
+    # Screenshot grab tuning (env vars, all optional). Used by the embedded
+    # driver's 3-tier screenshot path: JS canvas -> Qt QPixmap.grab() ->
+    # page-digest fallback. See drivers/qt_grab.py.
+    def _env_int(name, default):
+        raw = os.environ.get(name)
+        try:
+            return int(raw) if raw is not None else default
+        except ValueError:
+            return default
+    grab_settle_ms = _env_int("MINIMAL_WEBMCP_GRAB_SETTLE_MS", 200)
+    grab_timeout_ms = _env_int("MINIMAL_WEBMCP_GRAB_TIMEOUT_MS", 5000)
+
     # Headless + no-GPU setup MUST happen before any code path that
     # could import pywebview or construct QApplication. See _qt_env docstring.
     _qt_env.configure_qt_for_headless(headless=headless)
@@ -125,7 +139,8 @@ def main(argv=None):
         return 0
 
     # Default: embedded pywebview on main thread, server in worker.
-    return _run_embedded(headless)
+    return _run_embedded(headless, grab_settle_ms=grab_settle_ms,
+                         grab_timeout_ms=grab_timeout_ms)
 
 
 if __name__ == "__main__":

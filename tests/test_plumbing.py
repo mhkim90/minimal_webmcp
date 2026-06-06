@@ -91,23 +91,27 @@ def main():
         assert result["value"] == 2, f"evaluate failed: {result}"
         print(f"OK evaluate: {result}")
 
-        # 6. tools/call screenshot
+        # 6. tools/call screenshot -- new shape: MCP `type:"image"`
+        # content with base64 data and mimeType:image/png. No JSON
+        # parsing needed; the content envelope carries the bytes
+        # directly so modern clients can render inline.
         send(proc, "tools/call", {
             "name": "screenshot",
             "arguments": {},
         }, id_val=5)
         r = read_one(proc)
-        text = r["result"]["content"][0]["text"]
-        result = json.loads(text)
-        assert result["size"] > 0
-        assert result["data"]  # base64
-        # Verify magic bytes after decode
+        content = r["result"]["content"][0]
+        assert content["type"] == "image", f"expected type=image, got {content}"
+        assert content["mimeType"] == "image/png", f"expected mimeType=image/png, got {content}"
         import base64
-        png = base64.b64decode(result["data"])
+        png = base64.b64decode(content["data"])
         assert png[:8] == b"\x89PNG\r\n\x1a\n", f"bad PNG magic: {png[:8]!r}"
-        print(f"OK screenshot: size={result['size']}, magic valid")
+        assert len(png) > 0
+        print(f"OK screenshot: type=image, size={len(png)}, magic valid")
 
-        # 6b. tools/call screenshot with file path
+        # 6b. tools/call screenshot with file path -- still text content
+        # because the response is metadata about where the file was
+        # saved, not the image itself.
         shot_path = "/tmp/minimal_webmcp_test_shot.png"
         if os.path.exists(shot_path):
             os.remove(shot_path)
@@ -116,8 +120,9 @@ def main():
             "arguments": {"path": shot_path},
         }, id_val=51)
         r = read_one(proc)
-        text = r["result"]["content"][0]["text"]
-        result = json.loads(text)
+        content = r["result"]["content"][0]
+        assert content["type"] == "text", f"expected type=text for path=, got {content}"
+        result = json.loads(content["text"])
         assert result.get("saved_to") == shot_path
         assert os.path.exists(shot_path)
         assert os.path.getsize(shot_path) > 0
@@ -205,20 +210,26 @@ def main():
         print("OK ping")
 
         # 15. screenshot fallback shape (MOCK): confirm the tools layer
-        # passes a driver-returned fallback dict through unchanged, with
-        # fallback: true and a 'note' field.
+        # wraps the driver-returned fallback dict in a text content with
+        # a `[FALLBACK]` prefix and a JSON block, so the LLM client sees
+        # the degradation signal without having to parse for it.
         send(proc, "tools/call", {
             "name": "screenshot_fallback",
             "arguments": {},
         }, id_val=13)
         r = read_one(proc)
-        text = r["result"]["content"][0]["text"]
-        fb = json.loads(text)
+        content = r["result"]["content"][0]
+        assert content["type"] == "text", f"expected type=text, got {content}"
+        text = content["text"]
+        assert text.startswith("[FALLBACK]"), f"expected [FALLBACK] prefix, got {text!r}"
+        # The JSON payload follows a blank line after the prefix line.
+        payload = text.split("\n\n", 1)[1]
+        fb = json.loads(payload)
         assert fb.get("fallback") is True, f"expected fallback=true, got {fb}"
         assert fb.get("kind") == "page_digest", f"expected kind=page_digest, got {fb}"
         assert "data" in fb, f"expected 'data' in fallback, got {fb}"
         assert "note" in fb, f"expected 'note' in fallback, got {fb}"
-        print(f"OK screenshot_fallback: kind={fb.get('kind')}")
+        print(f"OK screenshot_fallback: prefix=[FALLBACK], kind={fb.get('kind')}")
 
         # Exit
         proc.stdin.close()
