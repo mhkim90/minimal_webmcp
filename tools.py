@@ -189,8 +189,13 @@ def call_tool(driver, name, args):
         text = args["text"]
         sel_js = _js_str(sel)
         text_js = json.dumps(text)
-        # Single round-trip: focus + type in one IIFE. Saves one
+        # Single round-trip: focus + clear + set in one IIFE. Saves one
         # evaluate_js bridge call per type_text (was 2: focus + send_keys).
+        # Replace semantics, not append: the field is set to `text` exactly,
+        # not `existing_value + text`. The previous append behavior made
+        # type_text non-idempotent on fields that already had content
+        # (e.g. re-running a smoke test against a server that persisted
+        # state produced a doubled path string).
         ok = driver.evaluate(
             f"(()=>{{"
             f"const e=document.querySelector({sel_js});"
@@ -201,10 +206,11 @@ def call_tool(driver, name, args):
             f"if(a.tagName==='INPUT'||a.tagName==='TEXTAREA'){{"
             f"  const proto=a.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype;"
             f"  const setter=Object.getOwnPropertyDescriptor(proto,'value').set;"
-            f"  setter.call(a,a.value+{text_js});"
+            f"  setter.call(a,{text_js});"
             f"  a.dispatchEvent(new Event('input',{{bubbles:true}}));"
             f"  a.dispatchEvent(new Event('change',{{bubbles:true}}));"
             f"}}else{{"
+            f"  document.execCommand('selectAll');"
             f"  document.execCommand('insertText',false,{text_js});"
             f"}}"
             f"return true;"
