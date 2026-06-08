@@ -91,10 +91,6 @@ def configure_qt_for_headless(headless: bool) -> None:
     if not headless:
         return
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
-    if "MINIMAL_WEBMCP_QT_FLAGS" not in os.environ:
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-            _DEFAULT_QT_FLAGS + " " + _extra_flags()
-        ).strip()
     if sys.platform.startswith("linux"):
         os.environ.setdefault("PYWEBVIEW_GUI", "qt")
     os.environ.setdefault("PYWEBVIEW_LOG", "WARNING")
