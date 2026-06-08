@@ -507,7 +507,7 @@ ALL OK
 
 ## Project status
 
-- **Version:** `0.2.0` (see `__init__.py`).
+- **Version:** `0.2.1` (see `__init__.py`).
 - **MCP protocol version:** `2024-11-05`.
 - **Transport:** stdio, NDJSON.
 - **Stdlib only** for the core, `tools.py`, `server.py`, `ws.py`, `drivers/mock.py`, and tests.
